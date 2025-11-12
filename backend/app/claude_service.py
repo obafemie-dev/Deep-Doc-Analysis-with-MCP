@@ -484,7 +484,7 @@ class ClaudeLLMService:
                     # Collect full response for potential recursion
                     full_content = []
 
-                    async for text in stream_manager.text_stream:
+                    for text in stream_manager.text_stream:
                         yield text  # Stream text in real-time
                         full_content.append(text)
 
