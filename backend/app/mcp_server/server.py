@@ -18,6 +18,26 @@ mcp_server = FastMCP("Excel Analysis Server")
 # ============================================================================
 
 @mcp_server.tool()
+def query_excel_data(
+    file_path: str,
+    sheet_name: Optional[str] = None,
+    filters: Optional[Dict[str, Any]] = None,
+    columns: Optional[List[str]] = None,
+    max_rows: int = 100
+) -> Dict[str, Any]:
+    """
+    Query Excel data with filtering - returns actual data rows from FULL dataset.
+    IMPORTANT: This queries the COMPLETE dataset, unlike read_data_from_excel which truncates.
+    Use this for ANY query about specific data values.
+
+    Examples:
+    - filters={'Model': '4430'} finds all rows where Model contains '4430'
+    - filters={'Year': 2023, 'Status': 'Active'} finds rows matching both conditions
+    """
+    return analysis_tools.query_excel_data(file_path, sheet_name, filters, columns, max_rows)
+
+
+@mcp_server.tool()
 def analyze_excel_data(
     file_path: str,
     sheet_name: Optional[str] = None,
@@ -337,3 +357,28 @@ def create_table(
     return pivot_chart_tools.create_table(
         file_path, sheet_name, data_range, table_name, style
     )
+
+
+# ============================================================================
+# UTILITY METHODS FOR TOOL ACCESS
+# ============================================================================
+
+def list_tools() -> Dict[str, Any]:
+    """
+    Get all registered tools from FastMCP 2.x
+    Returns a dictionary mapping tool names to their function callables
+    """
+    tools_dict = {}
+
+    if hasattr(mcp_server, '_tool_manager') and hasattr(mcp_server._tool_manager, '_tools'):
+        # In FastMCP 2.x, tools are stored in _tool_manager._tools as a dict
+        # Each entry is tool_name -> Tool object with a 'fn' attribute
+        for tool_name, tool_obj in mcp_server._tool_manager._tools.items():
+            if hasattr(tool_obj, 'fn'):
+                tools_dict[tool_name] = tool_obj.fn
+
+    return tools_dict
+
+
+# Add list_tools as a method to the mcp_server instance
+mcp_server.list_tools = list_tools
