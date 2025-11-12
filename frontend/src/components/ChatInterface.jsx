@@ -8,6 +8,9 @@ function ChatInterface({ uploadedFile, apiBaseUrl, onClearChat }) {
   const [inputMessage, setInputMessage] = useState('')
   const [sending, setSending] = useState(false)
   const messagesEndRef = useRef(null)
+  const welcomeShownForFile = useRef(null)
+  const streamingContentRef = useRef('')
+  const streamingThinkingRef = useRef([])
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -18,16 +21,23 @@ function ChatInterface({ uploadedFile, apiBaseUrl, onClearChat }) {
   }, [messages])
 
   useEffect(() => {
+    // Don't reset messages if we're in the middle of sending
+    if (sending) return
+
     // Add welcome message when file is uploaded
-    if (uploadedFile) {
+    if (uploadedFile && uploadedFile.file_path !== welcomeShownForFile.current) {
       const welcomeMessage = {
         role: 'assistant',
         content: `File "${uploadedFile.filename}" uploaded successfully! I can help you analyze this Excel file. Try asking me to:\n\n- Analyze the data statistics\n- Compare columns\n- Check for data quality issues\n- Create pivot tables\n- Generate charts\n- Detect trends or anomalies\n\nWhat would you like to know?`,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        id: Date.now()
       }
       setMessages([welcomeMessage])
+      welcomeShownForFile.current = uploadedFile.file_path
+    } else if (!uploadedFile) {
+      welcomeShownForFile.current = null
     }
-  }, [uploadedFile])
+  }, [uploadedFile, sending])
 
   const handleSendMessage = async (e) => {
     e.preventDefault()
@@ -45,7 +55,8 @@ function ChatInterface({ uploadedFile, apiBaseUrl, onClearChat }) {
     const userMessage = {
       role: 'user',
       content: inputMessage,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      id: Date.now()
     }
 
     setMessages(prev => [...prev, userMessage])
@@ -63,6 +74,10 @@ function ChatInterface({ uploadedFile, apiBaseUrl, onClearChat }) {
       id: assistantMessageId
     }
     setMessages(prev => [...prev, assistantMessage])
+
+    // Reset streaming refs for new message
+    streamingContentRef.current = ''
+    streamingThinkingRef.current = []
 
     try {
       // Use fetch for SSE streaming
@@ -116,29 +131,39 @@ function ChatInterface({ uploadedFile, apiBaseUrl, onClearChat }) {
 
               // Handle different event types
               if (parsed.type === 'content' && parsed.content) {
-                // Text content chunk
-                flushSync(() => {
-                  setMessages(prev => prev.map(msg =>
-                    msg.id === assistantMessageId
-                      ? { ...msg, content: msg.content + parsed.content }
-                      : msg
-                  ))
-                })
+                // Text content chunk - accumulate in ref first
+                streamingContentRef.current += parsed.content
+
+                // Update state with accumulated content
+                setMessages(prev => prev.map(msg =>
+                  msg.id === assistantMessageId
+                    ? {
+                        ...msg,
+                        content: streamingContentRef.current,
+                        thinking_steps: streamingThinkingRef.current
+                      }
+                    : msg
+                ))
               } else if (parsed.type && parsed.type !== 'content') {
-                // Chain of thought event (thinking_start, tool_start, tool_complete, etc.)
-                flushSync(() => {
-                  setMessages(prev => prev.map(msg =>
-                    msg.id === assistantMessageId
-                      ? {
-                          ...msg,
-                          thinking_steps: [...msg.thinking_steps, {
-                            ...parsed,
-                            timestamp: new Date().toISOString()
-                          }]
-                        }
-                      : msg
-                  ))
-                })
+                // Chain of thought event - accumulate in ref first
+                streamingThinkingRef.current = [
+                  ...streamingThinkingRef.current,
+                  {
+                    ...parsed,
+                    timestamp: new Date().toISOString()
+                  }
+                ]
+
+                // Update state with accumulated thinking steps
+                setMessages(prev => prev.map(msg =>
+                  msg.id === assistantMessageId
+                    ? {
+                        ...msg,
+                        content: streamingContentRef.current,
+                        thinking_steps: streamingThinkingRef.current
+                      }
+                    : msg
+                ))
               }
             } catch (err) {
               console.error('Error parsing SSE data:', err)
@@ -162,6 +187,9 @@ function ChatInterface({ uploadedFile, apiBaseUrl, onClearChat }) {
 
     } finally {
       setSending(false)
+      // Clear streaming refs after completion
+      streamingContentRef.current = ''
+      streamingThinkingRef.current = []
     }
   }
 
