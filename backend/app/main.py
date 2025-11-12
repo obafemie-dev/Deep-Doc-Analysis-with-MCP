@@ -2,12 +2,14 @@
 Main FastAPI Application - Deep Doc Analysis with MCP
 """
 import os
+import json
+import asyncio
 import shutil
 from pathlib import Path
 from typing import List
 from fastapi import FastAPI, UploadFile, File, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 import logging
 
 from .config import settings
@@ -18,10 +20,15 @@ from .models import (
     AnalysisResult
 )
 from .llm_service import llm_service
+from .claude_service import claude_service
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Select LLM service based on configuration
+active_llm_service = claude_service if settings.LLM_PROVIDER == "claude" else llm_service
+logger.info(f"Using LLM provider: {settings.LLM_PROVIDER}")
 
 # Create FastAPI app
 app = FastAPI(
@@ -55,15 +62,25 @@ async def health_check():
 
 @app.get(f"{settings.API_V1_STR}/status")
 async def get_status():
-    """Get system status including Ollama and model availability"""
-    ollama_status = llm_service.check_ollama_status()
+    """Get system status including LLM provider and model availability"""
+    llm_status = {}
+
+    if settings.LLM_PROVIDER == "ollama":
+        llm_status = llm_service.check_ollama_status()
+    else:
+        llm_status = {
+            "status": "configured",
+            "provider": "claude",
+            "model": settings.CLAUDE_MODEL
+        }
 
     return {
         "api_status": "running",
-        "ollama_status": ollama_status,
+        "llm_provider": settings.LLM_PROVIDER,
+        "llm_status": llm_status,
         "upload_dir": str(UPLOAD_DIR),
         "mcp_server": "active",
-        "available_tools": len(llm_service.mcp_tools)
+        "available_tools": len(active_llm_service.mcp_tools)
     }
 
 
@@ -210,13 +227,18 @@ async def chat(request: ChatRequest):
                     detail=f"File not found: {request.file_path}"
                 )
 
-        # Get LLM response
-        response_text = await llm_service.chat(
+        # Get LLM response (chat returns an async generator)
+        response_generator = active_llm_service.chat(
             message=request.message,
             conversation_history=request.conversation_history,
             file_path=request.file_path,
             stream=False
         )
+
+        # Collect the response from the async generator
+        response_text = ""
+        async for chunk in response_generator:
+            response_text += chunk
 
         logger.info(f"Chat response generated successfully")
 
@@ -232,6 +254,73 @@ async def chat(request: ChatRequest):
         )
 
 
+@app.post(f"{settings.API_V1_STR}/chat/stream")
+async def chat_stream(request: ChatRequest):
+    """
+    Chat with LLM about Excel files (Server-Sent Events streaming)
+
+    Args:
+        request: Chat request with message, optional file path, and conversation history
+
+    Returns:
+        Streaming response with real-time updates
+    """
+    try:
+        # Validate file path if provided
+        if request.file_path:
+            file_path = Path(request.file_path)
+            if not file_path.exists():
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"File not found: {request.file_path}"
+                )
+
+        async def event_generator():
+            """Generate Server-Sent Events"""
+            try:
+                # Get streaming response from LLM
+                response_generator = active_llm_service.chat(
+                    message=request.message,
+                    conversation_history=request.conversation_history,
+                    file_path=request.file_path,
+                    stream=True
+                )
+
+                # Stream each chunk as SSE
+                async for chunk in response_generator:
+                    # SSE format: "data: {json}\n\n"
+                    event_data = json.dumps({"content": chunk})
+                    yield f"data: {event_data}\n\n"
+                    await asyncio.sleep(0)  # Force immediate event loop flush
+
+                # Send completion signal
+                yield "data: [DONE]\n\n"
+
+            except Exception as e:
+                logger.error(f"Error in streaming: {e}", exc_info=True)
+                error_data = json.dumps({"error": str(e)})
+                yield f"data: {error_data}\n\n"
+                yield "data: [DONE]\n\n"
+
+        return StreamingResponse(
+            event_generator(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",  # Disable nginx buffering
+                "Transfer-Encoding": "chunked"  # Force chunked transfer
+            }
+        )
+
+    except Exception as e:
+        logger.error(f"Error setting up stream: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error setting up stream: {str(e)}"
+        )
+
+
 # ============================================================================
 # MODEL MANAGEMENT ENDPOINTS
 # ============================================================================
@@ -239,12 +328,18 @@ async def chat(request: ChatRequest):
 @app.post(f"{settings.API_V1_STR}/models/pull")
 async def pull_model():
     """
-    Pull the configured Ollama model if not available
+    Pull the configured Ollama model if not available (Ollama only)
 
     Returns:
         Success status and message
     """
     try:
+        if settings.LLM_PROVIDER != "ollama":
+            return {
+                "success": False,
+                "message": f"Model pulling only available for Ollama provider. Current provider: {settings.LLM_PROVIDER}"
+            }
+
         result = await llm_service.pull_model_if_needed()
         return result
 
@@ -266,12 +361,20 @@ async def list_available_tools():
     """
     tools = []
 
-    for tool in llm_service.mcp_tools:
-        tools.append({
-            "name": tool['function']['name'],
-            "description": tool['function']['description'],
-            "parameters": list(tool['function']['parameters']['properties'].keys())
-        })
+    for tool in active_llm_service.mcp_tools:
+        # Handle both Ollama and Claude tool formats
+        if settings.LLM_PROVIDER == "ollama":
+            tools.append({
+                "name": tool['function']['name'],
+                "description": tool['function']['description'],
+                "parameters": list(tool['function']['parameters']['properties'].keys())
+            })
+        else:  # Claude format
+            tools.append({
+                "name": tool['name'],
+                "description": tool['description'],
+                "parameters": list(tool['input_schema']['properties'].keys())
+            })
 
     return {
         "tools": tools,
