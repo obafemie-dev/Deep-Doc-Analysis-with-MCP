@@ -11,7 +11,8 @@ from .utils import (
     save_workbook,
     validate_file_path,
     validate_sheet_name,
-    get_sheet_names
+    get_sheet_names,
+    serialize_dataframe_for_json
 )
 
 
@@ -198,9 +199,9 @@ def read_data_from_excel(
     if is_truncated:
         half = max_rows // 2
         sample_df = pd.concat([df.head(half), df.tail(max_rows - half)])
-        data_records = sample_df.to_dict(orient='records')
+        data_records = serialize_dataframe_for_json(sample_df)
     else:
-        data_records = df.to_dict(orient='records')
+        data_records = serialize_dataframe_for_json(df)
 
     result = {
         'data': data_records,

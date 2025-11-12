@@ -4,7 +4,8 @@ import ast
 import logging
 import openpyxl
 import pandas as pd
-from typing import Optional, List, Union, Any
+from datetime import datetime
+from typing import Optional, List, Union, Any, Dict
 
 logger = logging.getLogger(__name__)
 
@@ -106,3 +107,33 @@ def coerce_string_to_type(value: Any) -> Any:
             # If both fail, return original value
             logger.warning(f"Failed to coerce string to type: {value[:100]}...")
             return value
+
+
+def serialize_dataframe_for_json(df: pd.DataFrame) -> List[Dict[str, Any]]:
+    """
+    Convert DataFrame to JSON-serializable list of dictionaries.
+    Handles datetime objects by converting them to ISO format strings.
+
+    Args:
+        df: DataFrame to serialize
+
+    Returns:
+        List of dictionaries with datetime objects converted to strings
+    """
+    # Convert datetime columns to ISO format strings
+    df_copy = df.copy()
+
+    for col in df_copy.columns:
+        if pd.api.types.is_datetime64_any_dtype(df_copy[col]):
+            # Handle datetime64 dtype columns
+            df_copy[col] = df_copy[col].dt.strftime('%Y-%m-%d %H:%M:%S')
+        elif df_copy[col].dtype == 'object':
+            # Check if first non-null value is a datetime-like object
+            sample = df_copy[col].dropna().head(1)
+            if len(sample) > 0 and isinstance(sample.iloc[0], (pd.Timestamp, datetime)):
+                # Convert Timestamp/datetime objects to strings
+                df_copy[col] = df_copy[col].apply(
+                    lambda x: x.strftime('%Y-%m-%d %H:%M:%S') if pd.notna(x) and isinstance(x, (pd.Timestamp, datetime)) else x
+                )
+
+    return df_copy.to_dict(orient='records')
