@@ -464,9 +464,8 @@ class ClaudeLLMService:
 
             logger.info(f"Making follow-up Claude API call (iteration {iteration + 1})")
 
-            # Check if we should stream (only for iterations that might be final)
-            # We use streaming when requested AND we're past first iteration (tools executed)
-            use_streaming = stream and iteration > 0
+            # Use streaming when requested (regardless of iteration)
+            use_streaming = stream
 
             if use_streaming:
                 logger.info("Using streaming API for final response")

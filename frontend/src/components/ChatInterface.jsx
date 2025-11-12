@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
+import { flushSync } from 'react-dom'
 import axios from 'axios'
 import MessageList from './MessageList'
 
@@ -113,11 +114,13 @@ function ChatInterface({ uploadedFile, apiBaseUrl }) {
               }
 
               if (parsed.content) {
-                setMessages(prev => prev.map(msg =>
-                  msg.id === assistantMessageId
-                    ? { ...msg, content: msg.content + parsed.content }
-                    : msg
-                ))
+                flushSync(() => {
+                  setMessages(prev => prev.map(msg =>
+                    msg.id === assistantMessageId
+                      ? { ...msg, content: msg.content + parsed.content }
+                      : msg
+                  ))
+                })
               }
             } catch (err) {
               console.error('Error parsing SSE data:', err)
