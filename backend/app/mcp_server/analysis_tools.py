@@ -5,7 +5,7 @@ import pandas as pd
 import numpy as np
 from scipy import stats
 from typing import Optional, List, Dict, Any
-from .utils import load_dataframe, validate_file_path, validate_sheet_name, coerce_string_to_type
+from .utils import load_dataframe, validate_file_path, validate_sheet_name, coerce_string_to_type, serialize_dataframe_for_json
 
 
 def query_excel_data(
@@ -79,7 +79,7 @@ def query_excel_data(
         result_df = df
 
     result = {
-        'data': result_df.to_dict(orient='records'),
+        'data': serialize_dataframe_for_json(result_df),
         'rows_returned': len(result_df),
         'total_matches': total_matches,
         'columns': df.columns.tolist(),
