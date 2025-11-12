@@ -1,6 +1,10 @@
 # Deep Doc Analysis with MCP
 
-A powerful web application for analyzing Excel files using AI (LLM) with Model Context Protocol (MCP) integration. Upload Excel files, ask questions, and get intelligent analysis with computational tools.
+> **AI-powered Excel file analysis** using Claude API and Model Context Protocol (MCP)
+
+Upload Excel files, ask questions in natural language, and get instant analysis with 26+ specialized tools.
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy)
 
 ## Features
 
@@ -30,7 +34,7 @@ A powerful web application for analyzing Excel files using AI (LLM) with Model C
 ### Backend
 - **FastAPI**: Modern Python web framework
 - **FastMCP**: Model Context Protocol server
-- **Ollama**: Local LLM runtime (Qwen2.5:1.5b-instruct)
+- **Claude API**: Anthropic's Claude Sonnet 4.5 (production LLM)
 - **openpyxl**: Excel file manipulation
 - **pandas**: Data analysis and processing
 - **scipy/statsmodels**: Statistical analysis
@@ -46,15 +50,30 @@ A powerful web application for analyzing Excel files using AI (LLM) with Model C
 - **Docker Compose**: Multi-container orchestration
 - **Nginx**: Frontend web server
 
+## 🚀 Deployment Options
+
+### **Option 1: Deploy to Render (Recommended)**
+
+The easiest way to get started! See [DEPLOYMENT.md](./DEPLOYMENT.md) for full guide.
+
+1. Click "Deploy to Render" button above
+2. Set your `ANTHROPIC_API_KEY`
+3. Deploy in ~10 minutes
+4. Start analyzing! 🎉
+
+**Cost**: Free tier (spins down) or $7/month always-on
+
+---
+
 ## Prerequisites
 
-- **Docker & Docker Compose** (recommended)
+- **Anthropic API Key** (get from https://console.anthropic.com)
+- **Docker & Docker Compose** (for local development)
 - OR manually install:
   - Python 3.11+
   - Node.js 20+
-  - Ollama
 
-## Quick Start with Docker (Recommended)
+## Quick Start - Local Development
 
 ### 1. Clone the repository
 
