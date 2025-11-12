@@ -13,8 +13,9 @@ function StatusBar({ status, onRefresh }) {
     return null
   }
 
-  const ollamaStatus = status.ollama_status || {}
-  const isHealthy = status.api_status === 'running' && ollamaStatus.status === 'running'
+  const llmStatus = status.llm_status || {}
+  const isHealthy = status.api_status === 'running' &&
+                    (llmStatus.status === 'running' || llmStatus.status === 'configured')
 
   return (
     <div className="bg-white rounded-lg shadow-sm p-6">
@@ -57,17 +58,21 @@ function StatusBar({ status, onRefresh }) {
           </div>
         </div>
 
-        {/* Ollama Status */}
+        {/* LLM Service Status */}
         <div className="flex items-center justify-between py-2 border-b border-gray-100">
-          <span className="text-sm text-gray-600">LLM Service</span>
+          <span className="text-sm text-gray-600">
+            LLM Service {status.llm_provider && `(${status.llm_provider})`}
+          </span>
           <div className="flex items-center space-x-2">
             <span
               className={`h-2 w-2 rounded-full ${
-                ollamaStatus.status === 'running' ? 'bg-green-500' : 'bg-red-500'
+                llmStatus.status === 'running' || llmStatus.status === 'configured'
+                  ? 'bg-green-500'
+                  : 'bg-red-500'
               }`}
             />
             <span className="text-sm font-medium text-gray-900">
-              {ollamaStatus.status || 'unknown'}
+              {llmStatus.status || 'unknown'}
             </span>
           </div>
         </div>
@@ -78,11 +83,11 @@ function StatusBar({ status, onRefresh }) {
           <div className="flex items-center space-x-2">
             <span
               className={`h-2 w-2 rounded-full ${
-                ollamaStatus.model_available ? 'bg-green-500' : 'bg-yellow-500'
+                llmStatus.model || llmStatus.model_available ? 'bg-green-500' : 'bg-yellow-500'
               }`}
             />
             <span className="text-xs font-medium text-gray-900 truncate max-w-[150px]">
-              {ollamaStatus.model || 'N/A'}
+              {llmStatus.model || 'N/A'}
             </span>
           </div>
         </div>
