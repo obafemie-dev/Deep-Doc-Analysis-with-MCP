@@ -10,6 +10,7 @@ function App() {
   const [uploadedFile, setUploadedFile] = useState(null)
   const [systemStatus, setSystemStatus] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [uploadKey, setUploadKey] = useState(0)
 
   useEffect(() => {
     checkSystemStatus()
@@ -46,6 +47,11 @@ function App() {
     }
   }
 
+  const handleClearChat = () => {
+    setUploadedFile(null)
+    setUploadKey(prev => prev + 1)
+  }
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
@@ -71,7 +77,7 @@ function App() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Sidebar */}
           <div className="lg:col-span-1 space-y-6">
-            <FileUpload onFileUpload={handleFileUpload} />
+            <FileUpload key={uploadKey} onFileUpload={handleFileUpload} />
             <StatusBar status={systemStatus} onRefresh={checkSystemStatus} />
           </div>
 
@@ -80,6 +86,7 @@ function App() {
             <ChatInterface
               uploadedFile={uploadedFile}
               apiBaseUrl={API_BASE_URL}
+              onClearChat={handleClearChat}
             />
           </div>
         </div>

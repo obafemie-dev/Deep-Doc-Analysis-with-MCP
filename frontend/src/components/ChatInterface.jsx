@@ -3,7 +3,7 @@ import { flushSync } from 'react-dom'
 import axios from 'axios'
 import MessageList from './MessageList'
 
-function ChatInterface({ uploadedFile, apiBaseUrl }) {
+function ChatInterface({ uploadedFile, apiBaseUrl, onClearChat }) {
   const [messages, setMessages] = useState([])
   const [inputMessage, setInputMessage] = useState('')
   const [sending, setSending] = useState(false)
@@ -175,6 +175,9 @@ function ChatInterface({ uploadedFile, apiBaseUrl }) {
   const clearChat = () => {
     if (window.confirm('Are you sure you want to clear the chat history?')) {
       setMessages([])
+      if (onClearChat) {
+        onClearChat()
+      }
     }
   }
 
