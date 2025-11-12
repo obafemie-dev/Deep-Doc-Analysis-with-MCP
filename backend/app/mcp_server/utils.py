@@ -1,7 +1,12 @@
 import os
+import json
+import ast
+import logging
 import openpyxl
 import pandas as pd
-from typing import Optional, List, Union
+from typing import Optional, List, Union, Any
+
+logger = logging.getLogger(__name__)
 
 
 def validate_file_path(file_path: str) -> bool:
@@ -55,3 +60,46 @@ def format_json_response(data: Union[dict, pd.DataFrame, pd.Series]) -> dict:
     elif isinstance(data, pd.Series):
         return data.to_dict()
     return data
+
+
+def coerce_string_to_type(value: Any) -> Any:
+    """
+    Coerce string parameters to proper Python types (dict/list).
+
+    This handles cases where API clients send "{'key': 'value'}" as a string
+    instead of an actual dict object.
+
+    Args:
+        value: Input value that may be a string representation of dict/list
+
+    Returns:
+        Properly typed value (dict, list, or original value)
+
+    Examples:
+        >>> coerce_string_to_type("{'Model': '4430'}")
+        {'Model': '4430'}
+        >>> coerce_string_to_type("['Model', 'VIN']")
+        ['Model', 'VIN']
+        >>> coerce_string_to_type("simple_string")
+        'simple_string'
+    """
+    if not isinstance(value, str) or not value.strip():
+        return value
+
+    # Check if string looks like dict or list
+    stripped = value.strip()
+    if not ((stripped.startswith('{') and stripped.endswith('}')) or
+            (stripped.startswith('[') and stripped.endswith(']'))):
+        return value
+
+    # Try ast.literal_eval first (safer)
+    try:
+        return ast.literal_eval(value)
+    except (ValueError, SyntaxError):
+        # Fallback to json.loads
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            # If both fail, return original value
+            logger.warning(f"Failed to coerce string to type: {value[:100]}...")
+            return value

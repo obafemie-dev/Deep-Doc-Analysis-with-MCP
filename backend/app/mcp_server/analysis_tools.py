@@ -5,7 +5,92 @@ import pandas as pd
 import numpy as np
 from scipy import stats
 from typing import Optional, List, Dict, Any
-from .utils import load_dataframe, validate_file_path, validate_sheet_name
+from .utils import load_dataframe, validate_file_path, validate_sheet_name, coerce_string_to_type
+
+
+def query_excel_data(
+    file_path: str,
+    sheet_name: Optional[str] = None,
+    filters: Optional[Dict[str, Any]] = None,
+    columns: Optional[List[str]] = None,
+    max_rows: int = 100
+) -> Dict[str, Any]:
+    """
+    Query Excel data with filtering - returns actual data rows from FULL dataset
+
+    IMPORTANT: This queries the COMPLETE dataset, unlike read_data_from_excel which truncates.
+    Use this for ANY query about specific data values.
+
+    Args:
+        file_path: Path to Excel file
+        sheet_name: Sheet to query (default: first sheet)
+        filters: Dictionary of column filters e.g., {'Model': '4430', 'Year': 2023}
+        columns: Specific columns to return (default: all columns)
+        max_rows: Maximum rows to return (default: 100)
+
+    Returns:
+        Dictionary with matching rows, total matches, and column info
+
+    Examples:
+        query_excel_data(file, 'Sheet1', filters={'Model': '4430'})
+        query_excel_data(file, 'Sheet1', filters={'Year': 2023, 'Status': 'Active'})
+    """
+    # Defensive parameter parsing using shared utility
+    filters = coerce_string_to_type(filters)
+    columns = coerce_string_to_type(columns)
+
+    # Validate coerced types
+    if filters is not None and not isinstance(filters, dict):
+        raise ValueError(f"Invalid filters format. Expected dict, got {type(filters).__name__}: {filters}")
+
+    if columns is not None and not isinstance(columns, list):
+        raise ValueError(f"Invalid columns format. Expected list, got {type(columns).__name__}: {columns}")
+
+    df = load_dataframe(file_path, sheet_name)
+
+    # Apply filters if provided
+    if filters:
+        for col, value in filters.items():
+            if col not in df.columns:
+                raise ValueError(f"Column '{col}' not found. Available: {df.columns.tolist()}")
+
+            # Handle different data types
+            if isinstance(value, str):
+                # Case-insensitive string comparison
+                df = df[df[col].astype(str).str.contains(value, case=False, na=False)]
+            else:
+                # Exact match for numbers
+                df = df[df[col] == value]
+
+    # Select specific columns if requested
+    if columns:
+        missing_cols = [c for c in columns if c not in df.columns]
+        if missing_cols:
+            raise ValueError(f"Columns not found: {missing_cols}. Available: {df.columns.tolist()}")
+        df = df[columns]
+
+    total_matches = len(df)
+    is_truncated = total_matches > max_rows
+
+    # Return sample if too many results
+    if is_truncated:
+        result_df = df.head(max_rows)
+    else:
+        result_df = df
+
+    result = {
+        'data': result_df.to_dict(orient='records'),
+        'rows_returned': len(result_df),
+        'total_matches': total_matches,
+        'columns': df.columns.tolist(),
+        'filters_applied': filters or {}
+    }
+
+    if is_truncated:
+        result['note'] = f"Showing first {max_rows} of {total_matches} matching rows"
+        result['truncated'] = True
+
+    return result
 
 
 def analyze_excel_data(
