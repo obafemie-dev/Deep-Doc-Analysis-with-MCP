@@ -68,13 +68,13 @@ def create_worksheet(
 
 def get_workbook_metadata(file_path: str) -> Dict[str, Any]:
     """
-    Get workbook information including sheets and ranges
+    Get workbook information including sheets, ranges, and column names
 
     Args:
         file_path: Path to Excel file
 
     Returns:
-        Workbook metadata
+        Workbook metadata with column names from header row
     """
     wb = load_workbook(file_path)
 
@@ -87,11 +87,19 @@ def get_workbook_metadata(file_path: str) -> Dict[str, Any]:
 
     for sheet_name in wb.sheetnames:
         ws = wb[sheet_name]
+
+        # Read first row as column headers
+        column_names = []
+        for col in range(1, ws.max_column + 1):
+            cell_value = ws.cell(row=1, column=col).value
+            column_names.append(str(cell_value) if cell_value else f"Column{col}")
+
         metadata['sheets_info'].append({
             'name': sheet_name,
             'max_row': ws.max_row,
             'max_column': ws.max_column,
-            'dimensions': ws.dimensions
+            'dimensions': ws.dimensions,
+            'column_names': column_names
         })
 
     return metadata
@@ -155,19 +163,21 @@ def read_data_from_excel(
     file_path: str,
     sheet_name: str,
     range_str: Optional[str] = None,
-    include_header: bool = True
+    include_header: bool = True,
+    max_rows: int = 100
 ) -> Dict[str, Any]:
     """
-    Read data from worksheet
+    Read data from worksheet with smart truncation
 
     Args:
         file_path: Path to Excel file
         sheet_name: Sheet to read from
         range_str: Optional cell range (e.g., 'A1:C10')
         include_header: Whether first row is header
+        max_rows: Maximum number of rows to return (default: 100)
 
     Returns:
-        Data as list of dictionaries
+        Data as list of dictionaries (truncated if necessary)
     """
     df = pd.read_excel(
         file_path,
@@ -181,12 +191,30 @@ def read_data_from_excel(
         # This is a simplified version; production code would need more robust parsing
         pass
 
-    return {
-        'data': df.to_dict(orient='records'),
-        'rows': len(df),
+    total_rows = len(df)
+    is_truncated = total_rows > max_rows
+
+    # If data is too large, return sample from beginning and end
+    if is_truncated:
+        half = max_rows // 2
+        sample_df = pd.concat([df.head(half), df.tail(max_rows - half)])
+        data_records = sample_df.to_dict(orient='records')
+    else:
+        data_records = df.to_dict(orient='records')
+
+    result = {
+        'data': data_records,
+        'rows': len(data_records),
+        'total_rows': total_rows,
         'columns': len(df.columns),
         'column_names': df.columns.tolist() if include_header else None
     }
+
+    if is_truncated:
+        result['note'] = f"Dataset truncated: showing {len(data_records)} of {total_rows} rows. Use analyze_excel_data with filters for specific data."
+        result['truncated'] = True
+
+    return result
 
 
 def copy_worksheet(
