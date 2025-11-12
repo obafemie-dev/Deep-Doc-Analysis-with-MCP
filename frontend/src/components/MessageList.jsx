@@ -23,9 +23,9 @@ function MessageList({ messages }) {
 
   return (
     <div className="space-y-4">
-      {messages.map((message, index) => (
+      {messages.map((message) => (
         <div
-          key={index}
+          key={message.id || message.timestamp || Math.random()}
           className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
         >
           <div
