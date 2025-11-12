@@ -308,7 +308,7 @@ class ClaudeLLMService:
         # Build messages with token management
         messages, system_prompt = self._build_messages(conversation_history, message, file_path)
 
-        # Call Claude API (initial call)
+        # Call Claude API (initial call) - no streaming for tool use phase
         response = self.client.messages.create(
             model=self.model,
             max_tokens=4096,
@@ -323,7 +323,8 @@ class ClaudeLLMService:
             messages,
             system_prompt,
             iteration=0,
-            max_iterations=5
+            max_iterations=5,
+            stream=stream
         ):
             yield chunk
 
@@ -334,7 +335,8 @@ class ClaudeLLMService:
         system_prompt: str,
         iteration: int = 0,
         max_iterations: int = 5,
-        accumulated_tokens: int = 0
+        accumulated_tokens: int = 0,
+        stream: bool = False
     ) -> AsyncGenerator[str, None]:
         """
         Handle Claude response with controlled iteration loop
@@ -346,6 +348,7 @@ class ClaudeLLMService:
             iteration: Current iteration number (0-indexed)
             max_iterations: Maximum number of iterations allowed
             accumulated_tokens: Total tokens used across iterations
+            stream: Whether to use streaming for final response
 
         This processes the response:
         1. Yields any text content from Claude
@@ -461,25 +464,69 @@ class ClaudeLLMService:
 
             logger.info(f"Making follow-up Claude API call (iteration {iteration + 1})")
 
-            # Make follow-up call (silent - no progress messages)
-            follow_up_response = self.client.messages.create(
-                model=self.model,
-                max_tokens=4096,
-                system=system_prompt,
-                messages=messages,
-                tools=self.mcp_tools
-            )
+            # Check if we should stream (only for iterations that might be final)
+            # We use streaming when requested AND we're past first iteration (tools executed)
+            use_streaming = stream and iteration > 0
 
-            # Handle follow-up with incremented iteration counter AND token tracking
-            async for chunk in self._handle_single_turn(
-                follow_up_response,
-                messages,
-                system_prompt,
-                iteration=iteration + 1,  # Increment iteration
-                max_iterations=max_iterations,
-                accumulated_tokens=current_tokens  # Pass tokens forward
-            ):
-                yield chunk
+            if use_streaming:
+                logger.info("Using streaming API for final response")
+                # Make streaming follow-up call
+                follow_up_stream = self.client.messages.stream(
+                    model=self.model,
+                    max_tokens=4096,
+                    system=system_prompt,
+                    messages=messages,
+                    tools=self.mcp_tools
+                )
+
+                # Process streaming response
+                with follow_up_stream as stream_manager:
+                    # Collect full response for potential recursion
+                    full_content = []
+
+                    async for text in stream_manager.text_stream:
+                        yield text  # Stream text in real-time
+                        full_content.append(text)
+
+                    # Get final message for checking tool calls
+                    final_message = stream_manager.get_final_message()
+
+                    # Check if there are tool calls (need to recurse)
+                    tool_calls = [block for block in final_message.content if block.type == "tool_use"]
+
+                    if tool_calls:
+                        # There are more tool calls - need to recurse without streaming
+                        async for chunk in self._handle_single_turn(
+                            final_message,
+                            messages,
+                            system_prompt,
+                            iteration=iteration + 1,
+                            max_iterations=max_iterations,
+                            accumulated_tokens=current_tokens,
+                            stream=False  # No streaming for tool execution phases
+                        ):
+                            yield chunk
+            else:
+                # Make non-streaming follow-up call (for tool execution phase)
+                follow_up_response = self.client.messages.create(
+                    model=self.model,
+                    max_tokens=4096,
+                    system=system_prompt,
+                    messages=messages,
+                    tools=self.mcp_tools
+                )
+
+                # Handle follow-up with incremented iteration counter AND token tracking
+                async for chunk in self._handle_single_turn(
+                    follow_up_response,
+                    messages,
+                    system_prompt,
+                    iteration=iteration + 1,  # Increment iteration
+                    max_iterations=max_iterations,
+                    accumulated_tokens=current_tokens,  # Pass tokens forward
+                    stream=stream  # Pass streaming flag
+                ):
+                    yield chunk
 
     async def _execute_mcp_tool(
         self,
