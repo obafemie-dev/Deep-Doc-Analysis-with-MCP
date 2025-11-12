@@ -58,6 +58,7 @@ function ChatInterface({ uploadedFile, apiBaseUrl }) {
     const assistantMessage = {
       role: 'assistant',
       content: '',
+      thinking_steps: [],  // Chain of thought events
       timestamp: new Date().toISOString(),
       id: assistantMessageId
     }
@@ -113,11 +114,28 @@ function ChatInterface({ uploadedFile, apiBaseUrl }) {
                 break
               }
 
-              if (parsed.content) {
+              // Handle different event types
+              if (parsed.type === 'content' && parsed.content) {
+                // Text content chunk
                 flushSync(() => {
                   setMessages(prev => prev.map(msg =>
                     msg.id === assistantMessageId
                       ? { ...msg, content: msg.content + parsed.content }
+                      : msg
+                  ))
+                })
+              } else if (parsed.type && parsed.type !== 'content') {
+                // Chain of thought event (thinking_start, tool_start, tool_complete, etc.)
+                flushSync(() => {
+                  setMessages(prev => prev.map(msg =>
+                    msg.id === assistantMessageId
+                      ? {
+                          ...msg,
+                          thinking_steps: [...msg.thinking_steps, {
+                            ...parsed,
+                            timestamp: new Date().toISOString()
+                          }]
+                        }
                       : msg
                   ))
                 })

@@ -289,7 +289,13 @@ async def chat_stream(request: ChatRequest):
                 # Stream each chunk as SSE
                 async for chunk in response_generator:
                     # SSE format: "data: {json}\n\n"
-                    event_data = json.dumps({"content": chunk})
+                    if isinstance(chunk, dict):
+                        # Chain of thought event (tool execution, thinking, etc.)
+                        event_data = json.dumps(chunk)
+                    else:
+                        # Text content chunk
+                        event_data = json.dumps({"type": "content", "content": chunk})
+
                     yield f"data: {event_data}\n\n"
                     await asyncio.sleep(0)  # Force immediate event loop flush
 
