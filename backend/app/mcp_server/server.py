@@ -30,9 +30,13 @@ def query_excel_data(
     IMPORTANT: This queries the COMPLETE dataset, unlike read_data_from_excel which truncates.
     Use this for ANY query about specific data values.
 
+    CRITICAL - Column Names: Use EXACT column names from get_workbook_metadata.
+    DO NOT guess or modify column names. Call get_workbook_metadata first to discover exact names.
+
     Examples:
     - filters={'Model': '4430'} finds all rows where Model contains '4430'
     - filters={'Year': 2023, 'Status': 'Active'} finds rows matching both conditions
+    - columns=['Selling', 'Advertised'] returns ONLY these columns (use exact names from metadata)
     """
     return analysis_tools.query_excel_data(file_path, sheet_name, filters, columns, max_rows)
 
@@ -46,6 +50,8 @@ def analyze_excel_data(
     """
     Comprehensive statistical analysis of Excel data.
     Returns summary statistics, null counts, data types, and shape.
+
+    CRITICAL: Use EXACT column names from get_workbook_metadata - do not guess names.
     """
     return analysis_tools.analyze_excel_data(file_path, sheet_name, columns)
 
@@ -60,6 +66,8 @@ def compare_columns(
     """
     Statistical comparison between two columns.
     Returns correlation, t-test results, and descriptive statistics.
+
+    CRITICAL: Use EXACT column names from get_workbook_metadata - do not guess names.
     """
     return analysis_tools.compare_columns(file_path, column1, column2, sheet_name)
 
@@ -149,7 +157,11 @@ def create_worksheet(
 
 @mcp_server.tool()
 def get_workbook_metadata(file_path: str) -> Dict[str, Any]:
-    """Get workbook information including sheets and ranges."""
+    """
+    Get workbook information including sheets, ranges, and EXACT column names.
+    CRITICAL: Call this FIRST before any data queries to discover exact column names.
+    Returns 'column_names' array for each sheet - use these EXACT names in queries.
+    """
     return manipulation_tools.get_workbook_metadata(file_path)
 
 
