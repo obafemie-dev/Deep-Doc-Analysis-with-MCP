@@ -1,3 +1,5 @@
+import ThinkingSteps from './ThinkingSteps'
+
 function MessageList({ messages }) {
   const formatTimestamp = (timestamp) => {
     if (!timestamp) return ''
@@ -49,6 +51,11 @@ function MessageList({ messages }) {
                 </>
               )}
             </div>
+
+            {/* Chain of Thought - Show thinking steps for assistant messages */}
+            {message.role === 'assistant' && message.thinking_steps && message.thinking_steps.length > 0 && (
+              <ThinkingSteps steps={message.thinking_steps} />
+            )}
 
             {/* Message Content */}
             <div

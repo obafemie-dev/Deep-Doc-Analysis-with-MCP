@@ -409,11 +409,29 @@ class ClaudeLLMService:
         for tc in tool_calls:
             logger.info(f"  - {tc.name}({list(tc.input.keys()) if hasattr(tc.input, 'keys') else 'no args'})")
 
-        for tool_call in tool_calls:
+        # Notify user that tools are being used (chain of thought)
+        if stream and len(tool_calls) > 0:
+            tool_names = [tc.name for tc in tool_calls]
+            yield {
+                "type": "thinking_start",
+                "message": f"Using {len(tool_calls)} tool{'s' if len(tool_calls) != 1 else ''} to analyze your data",
+                "tools": tool_names
+            }
+
+        for idx, tool_call in enumerate(tool_calls, 1):
             function_name = tool_call.name
             function_args = tool_call.input
 
-            # Execute MCP tool silently
+            # Notify user that tool is starting (chain of thought)
+            if stream:
+                yield {
+                    "type": "tool_start",
+                    "tool_name": function_name,
+                    "step": idx,
+                    "total_steps": len(tool_calls)
+                }
+
+            # Execute MCP tool
             try:
                 result = await self._execute_mcp_tool(function_name, function_args)
 
@@ -422,6 +440,15 @@ class ClaudeLLMService:
 
                 result_size = len(json.dumps(result))
                 logger.info(f"Tool '{function_name}' returned result ({result_size} chars)")
+
+                # Notify user of successful completion (chain of thought)
+                if stream:
+                    summary = self._summarize_tool_result(function_name, result)
+                    yield {
+                        "type": "tool_complete",
+                        "tool_name": function_name,
+                        "summary": summary
+                    }
 
                 # Store for Claude follow-up (internal only)
                 tool_results.append({
@@ -432,6 +459,15 @@ class ClaudeLLMService:
 
             except Exception as e:
                 logger.error(f"Tool '{function_name}' failed: {str(e)}")
+
+                # Notify user of error (chain of thought)
+                if stream:
+                    yield {
+                        "type": "tool_error",
+                        "tool_name": function_name,
+                        "error": str(e)
+                    }
+
                 # Store error for Claude to handle
                 tool_results.append({
                     "type": "tool_result",
@@ -461,6 +497,13 @@ class ClaudeLLMService:
                 logger.error(f"Token limit exceeded! ({current_tokens} > {self.max_context_tokens})")
                 yield "\n\n[Context limit approaching - please use more specific queries or filters]"
                 return
+
+            # Notify user that analysis is in progress (chain of thought)
+            if stream:
+                yield {
+                    "type": "thinking",
+                    "message": "Analyzing results..."
+                }
 
             logger.info(f"Making follow-up Claude API call (iteration {iteration + 1})")
 
@@ -526,6 +569,45 @@ class ClaudeLLMService:
                     stream=stream  # Pass streaming flag
                 ):
                     yield chunk
+
+    def _summarize_tool_result(self, tool_name: str, result: Any) -> str:
+        """
+        Create user-friendly summary of tool execution result
+
+        Args:
+            tool_name: Name of the tool executed
+            result: Tool execution result
+
+        Returns:
+            User-friendly summary string
+        """
+        try:
+            if isinstance(result, dict):
+                # Handle common result patterns
+                if 'rows_returned' in result:
+                    rows = result.get('rows_returned', 0)
+                    total = result.get('total_matches', rows)
+                    if total > rows:
+                        return f"Found {total} rows (showing {rows})"
+                    return f"Found {rows} row{'s' if rows != 1 else ''}"
+
+                if 'sheets' in result:
+                    count = len(result['sheets'])
+                    return f"Found {count} sheet{'s' if count != 1 else ''}"
+
+                if 'data' in result:
+                    if isinstance(result['data'], list):
+                        return f"Retrieved {len(result['data'])} record{'s' if len(result['data']) != 1 else ''}"
+
+                # Generic dict result
+                keys = len(result.keys())
+                return f"Completed with {keys} field{'s' if keys != 1 else ''}"
+
+            # Fallback for other types
+            return "Completed successfully"
+
+        except Exception:
+            return "Completed"
 
     async def _execute_mcp_tool(
         self,
