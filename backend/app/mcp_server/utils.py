@@ -30,6 +30,9 @@ def load_workbook(file_path: str):
 def load_dataframe(file_path: str, sheet_name: Optional[str] = None) -> pd.DataFrame:
     """Load Excel data as pandas DataFrame"""
     validate_file_path(file_path)
+    # If sheet_name is None, read first sheet (pd.read_excel returns dict if sheet_name=None)
+    if sheet_name is None:
+        sheet_name = 0  # Read first sheet by index
     return pd.read_excel(file_path, sheet_name=sheet_name)
 
 

@@ -48,36 +48,96 @@ function ChatInterface({ uploadedFile, apiBaseUrl }) {
     }
 
     setMessages(prev => [...prev, userMessage])
+    const userInputMessage = inputMessage
     setInputMessage('')
     setSending(true)
 
+    // Create placeholder for streaming response
+    const assistantMessageId = Date.now()
+    const assistantMessage = {
+      role: 'assistant',
+      content: '',
+      timestamp: new Date().toISOString(),
+      id: assistantMessageId
+    }
+    setMessages(prev => [...prev, assistantMessage])
+
     try {
-      const response = await axios.post(`${apiBaseUrl}/chat`, {
-        message: inputMessage,
-        file_path: uploadedFile.file_path,
-        conversation_history: messages
+      // Use fetch for SSE streaming
+      const response = await fetch(`${apiBaseUrl}/chat/stream`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          message: userInputMessage,
+          file_path: uploadedFile.file_path,
+          conversation_history: messages
+        })
       })
 
-      // Add assistant response
-      const assistantMessage = {
-        role: 'assistant',
-        content: response.data.response,
-        timestamp: response.data.timestamp
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
       }
 
-      setMessages(prev => [...prev, assistantMessage])
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+
+      while (true) {
+        const { value, done } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = line.slice(6)
+
+            if (data === '[DONE]') {
+              break
+            }
+
+            try {
+              const parsed = JSON.parse(data)
+
+              if (parsed.error) {
+                setMessages(prev => prev.map(msg =>
+                  msg.id === assistantMessageId
+                    ? { ...msg, content: `Error: ${parsed.error}`, isError: true }
+                    : msg
+                ))
+                break
+              }
+
+              if (parsed.content) {
+                setMessages(prev => prev.map(msg =>
+                  msg.id === assistantMessageId
+                    ? { ...msg, content: msg.content + parsed.content }
+                    : msg
+                ))
+              }
+            } catch (err) {
+              console.error('Error parsing SSE data:', err)
+            }
+          }
+        }
+      }
 
     } catch (error) {
       console.error('Error sending message:', error)
 
-      const errorMessage = {
-        role: 'assistant',
-        content: `Error: ${error.response?.data?.detail || 'Failed to get response from server'}`,
-        timestamp: new Date().toISOString(),
-        isError: true
-      }
-
-      setMessages(prev => [...prev, errorMessage])
+      setMessages(prev => prev.map(msg =>
+        msg.id === assistantMessageId
+          ? {
+              ...msg,
+              content: `Error: ${error.message || 'Failed to get response from server'}`,
+              isError: true
+            }
+          : msg
+      ))
 
     } finally {
       setSending(false)
