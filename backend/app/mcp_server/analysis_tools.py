@@ -58,8 +58,11 @@ def query_excel_data(
             if isinstance(value, str):
                 # Case-insensitive string comparison
                 df = df[df[col].astype(str).str.contains(value, case=False, na=False)]
+            elif isinstance(value, (list, tuple)):
+                # Multiple values - use isin() for OR condition
+                df = df[df[col].isin(value)]
             else:
-                # Exact match for numbers
+                # Exact match for single value (number, etc.)
                 df = df[df[col] == value]
 
     # Select specific columns if requested
