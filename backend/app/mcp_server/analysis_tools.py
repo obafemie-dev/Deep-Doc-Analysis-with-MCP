@@ -56,13 +56,23 @@ def query_excel_data(
 
             # Handle different data types
             if isinstance(value, str):
-                # Case-insensitive string comparison
+                # Case-insensitive partial match for strings
                 df = df[df[col].astype(str).str.contains(value, case=False, na=False)]
             elif isinstance(value, (list, tuple)):
-                # Multiple values - use isin() for OR condition
-                df = df[df[col].isin(value)]
+                # Multiple values - use partial matching for each value (OR condition)
+                # This allows ['4430', '4440'] to match '4430G', '4440J', etc.
+                import pandas as pd
+                mask = pd.Series([False] * len(df))
+                for v in value:
+                    if isinstance(v, str):
+                        # Partial match for strings in list
+                        mask |= df[col].astype(str).str.contains(str(v), case=False, na=False)
+                    else:
+                        # Exact match for numbers in list
+                        mask |= (df[col] == v)
+                df = df[mask]
             else:
-                # Exact match for single value (number, etc.)
+                # Exact match for single numeric value
                 df = df[df[col] == value]
 
     # Select specific columns if requested
