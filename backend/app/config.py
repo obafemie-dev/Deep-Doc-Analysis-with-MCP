@@ -1,5 +1,6 @@
 from pydantic_settings import BaseSettings
-from typing import Optional
+from pydantic import model_validator
+from typing import Optional, Union
 
 
 class Settings(BaseSettings):
@@ -7,8 +8,19 @@ class Settings(BaseSettings):
     API_V1_STR: str = "/api/v1"
     PROJECT_NAME: str = "Deep Doc Analysis with MCP"
 
-    # CORS
-    BACKEND_CORS_ORIGINS: list[str] = ["http://localhost:3000", "http://localhost:5173"]
+    # CORS - Comma-separated list of allowed origins
+    BACKEND_CORS_ORIGINS: Union[str, list[str]] = "http://localhost:3000,http://localhost:5173"
+
+    @model_validator(mode='after')
+    def parse_cors_origins(self):
+        """Parse comma-separated CORS origins into a list"""
+        if isinstance(self.BACKEND_CORS_ORIGINS, str):
+            self.BACKEND_CORS_ORIGINS = [
+                origin.strip()
+                for origin in self.BACKEND_CORS_ORIGINS.split(',')
+                if origin.strip()
+            ]
+        return self
 
     # File Upload
     UPLOAD_DIR: str = "./uploads"
