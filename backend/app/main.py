@@ -60,6 +60,16 @@ async def health_check():
     return {"status": "healthy", "service": settings.PROJECT_NAME}
 
 
+@app.get("/debug/cors")
+async def debug_cors():
+    """Debug endpoint to check CORS configuration"""
+    return {
+        "cors_origins": settings.BACKEND_CORS_ORIGINS,
+        "cors_origins_type": type(settings.BACKEND_CORS_ORIGINS).__name__,
+        "cors_origins_count": len(settings.BACKEND_CORS_ORIGINS) if isinstance(settings.BACKEND_CORS_ORIGINS, list) else 0
+    }
+
+
 @app.get(f"{settings.API_V1_STR}/status")
 async def get_status():
     """Get system status including LLM provider and model availability"""
