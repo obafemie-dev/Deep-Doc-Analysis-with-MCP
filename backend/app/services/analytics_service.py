@@ -3,7 +3,7 @@ Analytics service for event tracking and analytics operations
 """
 from typing import Optional, Dict, Any, List
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update, func, and_, or_
+from sqlalchemy import select, update, func, and_, or_, Integer
 from datetime import datetime, timedelta
 import logging
 
