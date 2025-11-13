@@ -24,6 +24,8 @@ from .claude_service import claude_service
 from .database import init_analytics_db
 from .middleware.analytics_middleware import AnalyticsMiddleware
 from .routers import analytics
+# Import models to register them with SQLAlchemy Base.metadata before init_analytics_db
+from .models import analytics as analytics_models  # noqa: F401
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)

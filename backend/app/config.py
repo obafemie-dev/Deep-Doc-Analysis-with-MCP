@@ -24,7 +24,7 @@ class Settings(BaseSettings):
 
     # Claude Settings
     CLAUDE_MODEL: str = "claude-3-5-sonnet-20241022"
-    CLAUDE_API_KEY: Optional[str] = None
+    ANTHROPIC_API_KEY: Optional[str] = None  # Used by claude_service.py
 
     # MCP Server Settings
     MCP_SERVER_NAME: str = "Excel Analysis Server"

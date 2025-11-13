@@ -4,7 +4,7 @@
  * Manages session ID for analytics tracking across the application.
  * Session ID is persisted in localStorage and sent with all API requests.
  */
-import React, { createContext, useState, useEffect, useContext } from 'react';
+import React, { createContext, useState, useEffect, useContext, useCallback } from 'react';
 
 // Generate UUID v4
 function generateUUID() {
@@ -32,14 +32,8 @@ export const SessionProvider = ({ children }) => {
 
   const [sessionStarted, setSessionStarted] = useState(false);
 
-  // Initialize session on mount
-  useEffect(() => {
-    if (!sessionStarted) {
-      initSession();
-    }
-  }, [sessionId, sessionStarted]);
-
-  const initSession = async () => {
+  // Memoize initSession to prevent re-creation on every render
+  const initSession = useCallback(async () => {
     try {
       await fetch('/api/v1/analytics/session/start', {
         method: 'POST',
@@ -58,7 +52,14 @@ export const SessionProvider = ({ children }) => {
     } catch (error) {
       console.error('Failed to start analytics session:', error);
     }
-  };
+  }, [sessionId]);
+
+  // Initialize session on mount
+  useEffect(() => {
+    if (!sessionStarted) {
+      initSession();
+    }
+  }, [sessionStarted, initSession]);
 
   const resetSession = () => {
     const newId = generateUUID();
