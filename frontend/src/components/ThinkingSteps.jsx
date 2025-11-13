@@ -1,7 +1,9 @@
 import { useState } from 'react'
 
 function ThinkingSteps({ steps }) {
-  const [isExpanded, setIsExpanded] = useState(false)
+  // Auto-expand if there are errors to show transparency
+  const hasErrors = steps && steps.some(s => s.type === 'tool_error')
+  const [isExpanded, setIsExpanded] = useState(hasErrors)
 
   if (!steps || steps.length === 0) {
     return null
@@ -28,7 +30,7 @@ function ThinkingSteps({ steps }) {
       case 'tool_complete':
         return '✓'
       case 'tool_error':
-        return '✗'
+        return '⚠️'
       case 'thinking':
         return '💭'
       default:

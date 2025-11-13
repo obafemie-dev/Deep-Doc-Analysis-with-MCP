@@ -100,12 +100,18 @@ function ChatInterface({ uploadedFile, apiBaseUrl, onClearChat }) {
       const reader = response.body.getReader()
       const decoder = new TextDecoder()
       let buffer = ''
+      let chunkNumber = 0
 
       while (true) {
         const { value, done } = await reader.read()
-        if (done) break
+        if (done) {
+          break
+        }
 
-        buffer += decoder.decode(value, { stream: true })
+        chunkNumber++
+        const decoded = decoder.decode(value, { stream: true })
+
+        buffer += decoded
         const lines = buffer.split('\n')
         buffer = lines.pop() || ''
 
@@ -120,7 +126,7 @@ function ChatInterface({ uploadedFile, apiBaseUrl, onClearChat }) {
             try {
               const parsed = JSON.parse(data)
 
-              if (parsed.error) {
+              if (parsed.error && !parsed.type) {
                 setMessages(prev => prev.map(msg =>
                   msg.id === assistantMessageId
                     ? { ...msg, content: `Error: ${parsed.error}`, isError: true }
