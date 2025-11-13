@@ -15,9 +15,16 @@ class Settings(BaseSettings):
     MAX_FILE_SIZE: int = 50 * 1024 * 1024  # 50MB
     ALLOWED_EXTENSIONS: set[str] = {".xlsx", ".xls", ".xlsm"}
 
+    # LLM Settings
+    LLM_PROVIDER: str = "claude"  # "ollama" or "claude"
+
     # Ollama Settings
     OLLAMA_BASE_URL: str = "http://localhost:11434"
-    OLLAMA_MODEL: str = "qwen2.5:1.5b-instruct"
+    OLLAMA_MODEL: str = "qwen2.5:3b"
+
+    # Claude Settings
+    ANTHROPIC_API_KEY: str = ""
+    CLAUDE_MODEL: str = "claude-sonnet-4-20250514"
 
     # MCP Server Settings
     MCP_SERVER_NAME: str = "Excel Analysis Server"

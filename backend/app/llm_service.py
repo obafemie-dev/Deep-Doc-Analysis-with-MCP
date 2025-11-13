@@ -15,6 +15,8 @@ class LLMService:
     def __init__(self):
         self.model = settings.OLLAMA_MODEL
         self.base_url = settings.OLLAMA_BASE_URL
+        # Initialize Ollama client with custom host
+        self.client = ollama.Client(host=self.base_url)
         self.mcp_tools = self._get_mcp_tools()
 
     def _get_mcp_tools(self) -> List[Dict[str, Any]]:
@@ -23,8 +25,15 @@ class LLMService:
         """
         tools = []
 
-        # Get all registered tools from MCP server
-        for tool_name, tool_func in mcp_server.list_tools().items():
+        # Get all registered tools from MCP server (FastMCP 2.x API)
+        # In FastMCP 2.x, tools are stored in _tool_manager._tools
+        mcp_tools_dict = {}
+        if hasattr(mcp_server, '_tool_manager') and hasattr(mcp_server._tool_manager, '_tools'):
+            # _tools is a dict of tool name -> Tool object
+            # Each Tool object has a 'fn' attribute with the actual function
+            mcp_tools_dict = {name: tool.fn for name, tool in mcp_server._tool_manager._tools.items()}
+
+        for tool_name, tool_func in mcp_tools_dict.items():
             # Get function signature and docstring
             import inspect
 
@@ -81,7 +90,7 @@ class LLMService:
         conversation_history: List[ChatMessage],
         file_path: Optional[str] = None,
         stream: bool = False
-    ) -> AsyncGenerator[str, None] | str:
+    ) -> AsyncGenerator[str, None]:
         """
         Process chat message with LLM and MCP tools
 
@@ -99,14 +108,21 @@ class LLMService:
 
         # System message with context about available tools
         system_msg = (
-            "You are an expert Excel data analyst. You have access to powerful tools "
-            "for analyzing, manipulating, and visualizing Excel data. "
-            "When a user asks about Excel data, use the appropriate tools to help them.\n\n"
+            "You are an expert Excel data analyst with access to powerful MCP tools.\n\n"
+            "CRITICAL RULES:\n"
+            "1. ALWAYS use tools to explore and analyze data - NEVER make assumptions\n"
+            "2. When asked about data, FIRST use get_workbook_metadata to see sheet names\n"
+            "3. Then use read_data_from_excel or analyze_excel_data to examine the actual data\n"
+            "4. Be thorough - check column names, data types, and sample rows before answering\n"
+            "5. If searching for specific values, use the tools to filter and search the data\n\n"
         )
 
         if file_path:
-            system_msg += f"The user has uploaded an Excel file at: {file_path}\n"
-            system_msg += "Use the available tools to analyze this file when appropriate.\n"
+            system_msg += f"Excel file location: {file_path}\n"
+            system_msg += (
+                "WORKFLOW: First explore file structure → Then analyze specific data → "
+                "Finally provide accurate answers based on actual tool results.\n"
+            )
 
         messages.append({
             "role": "system",
@@ -127,7 +143,7 @@ class LLMService:
         })
 
         # Call Ollama with function calling
-        response = ollama.chat(
+        response = self.client.chat(
             model=self.model,
             messages=messages,
             tools=self.mcp_tools,
@@ -139,23 +155,24 @@ class LLMService:
             async for chunk in self._handle_streaming_response(response):
                 yield chunk
         else:
-            # Handle complete response
-            return await self._handle_response(response, messages)
+            # Handle complete response with progress updates
+            async for chunk in self._handle_response(response, messages):
+                yield chunk
 
     async def _handle_response(
         self,
         response: Dict[str, Any],
         messages: List[Dict[str, Any]]
-    ) -> str:
+    ) -> AsyncGenerator[str, None]:
         """
-        Handle LLM response including tool calls
+        Handle LLM response including tool calls, yielding progress updates
 
         Args:
             response: Ollama response
             messages: Current message history
 
-        Returns:
-            Final assistant response
+        Yields:
+            Progress updates and final assistant response
         """
         assistant_message = response.get('message', {})
 
@@ -164,14 +181,18 @@ class LLMService:
 
         if not tool_calls:
             # No tool calls, return direct response
-            return assistant_message.get('content', '')
+            yield assistant_message.get('content', '')
+            return
 
-        # Execute tool calls
+        # Execute tool calls with progress updates
         messages.append(assistant_message)
 
-        for tool_call in tool_calls:
+        for idx, tool_call in enumerate(tool_calls, 1):
             function_name = tool_call['function']['name']
             function_args = tool_call['function']['arguments']
+
+            # Yield progress update
+            yield f"\n🔧 [Tool {idx}/{len(tool_calls)}] Executing: {function_name}...\n"
 
             # Execute MCP tool
             try:
@@ -183,6 +204,10 @@ class LLMService:
                     "content": json.dumps(result),
                     "name": function_name
                 })
+
+                # Yield completion update
+                yield f"✓ [Tool {idx}/{len(tool_calls)}] Completed: {function_name}\n"
+
             except Exception as e:
                 # Handle tool execution errors
                 messages.append({
@@ -191,13 +216,19 @@ class LLMService:
                     "name": function_name
                 })
 
+                # Yield error update
+                yield f"✗ [Tool {idx}/{len(tool_calls)}] Failed: {function_name} - {str(e)}\n"
+
+        # Yield final analysis message
+        yield "\n💭 Analyzing results...\n\n"
+
         # Get final response from LLM after tool execution
-        final_response = ollama.chat(
+        final_response = self.client.chat(
             model=self.model,
             messages=messages
         )
 
-        return final_response['message']['content']
+        yield final_response['message']['content']
 
     async def _handle_streaming_response(
         self,
@@ -258,8 +289,10 @@ class LLMService:
             Status information
         """
         try:
-            models = ollama.list()
-            model_names = [m['name'] for m in models.get('models', [])]
+            models_response = self.client.list()
+            # In ollama library, models is an attribute, and each model has a 'model' attribute
+            model_list = models_response.models if hasattr(models_response, 'models') else []
+            model_names = [m.model for m in model_list]
 
             is_model_available = any(
                 self.model in name for name in model_names
@@ -272,9 +305,11 @@ class LLMService:
                 'available_models': model_names
             }
         except Exception as e:
+            import traceback
             return {
                 'status': 'error',
-                'error': str(e),
+                'error': f"Error: {str(e)}",
+                'traceback': traceback.format_exc(),
                 'model': self.model,
                 'model_available': False
             }
@@ -287,7 +322,7 @@ class LLMService:
 
         if not status.get('model_available', False):
             try:
-                ollama.pull(self.model)
+                self.client.pull(self.model)
                 return {'success': True, 'message': f'Model {self.model} pulled successfully'}
             except Exception as e:
                 return {'success': False, 'error': str(e)}
