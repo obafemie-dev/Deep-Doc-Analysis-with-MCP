@@ -52,11 +52,12 @@ function ChatInterface({ uploadedFile, apiBaseUrl, onClearChat }) {
     }
 
     // Add user message
+    const userMessageId = Date.now()
     const userMessage = {
       role: 'user',
       content: inputMessage,
       timestamp: new Date().toISOString(),
-      id: Date.now()
+      id: userMessageId
     }
 
     setMessages(prev => [...prev, userMessage])
@@ -64,8 +65,8 @@ function ChatInterface({ uploadedFile, apiBaseUrl, onClearChat }) {
     setInputMessage('')
     setSending(true)
 
-    // Create placeholder for streaming response
-    const assistantMessageId = Date.now()
+    // Create placeholder for streaming response (add 1ms to ensure unique ID)
+    const assistantMessageId = userMessageId + 1
     const assistantMessage = {
       role: 'assistant',
       content: '',
