@@ -1,12 +1,13 @@
+import ThinkingSteps from './ThinkingSteps'
+
 function MessageList({ messages }) {
   const formatTimestamp = (timestamp) => {
     if (!timestamp) return ''
 
     const date = new Date(timestamp)
-    return date.toLocaleTimeString('en-US', {
-      hour: '2-digit',
-      minute: '2-digit'
-    })
+    const hours = date.getHours().toString().padStart(2, '0')
+    const minutes = date.getMinutes().toString().padStart(2, '0')
+    return `${hours}:${minutes}`
   }
 
   const formatContent = (content) => {
@@ -22,9 +23,9 @@ function MessageList({ messages }) {
 
   return (
     <div className="space-y-4">
-      {messages.map((message, index) => (
+      {messages.map((message) => (
         <div
-          key={index}
+          key={message.id || message.timestamp || Math.random()}
           className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
         >
           <div
@@ -50,6 +51,11 @@ function MessageList({ messages }) {
                 </>
               )}
             </div>
+
+            {/* Chain of Thought - Show thinking steps for assistant messages */}
+            {message.role === 'assistant' && message.thinking_steps && message.thinking_steps.length > 0 && (
+              <ThinkingSteps steps={message.thinking_steps} />
+            )}
 
             {/* Message Content */}
             <div

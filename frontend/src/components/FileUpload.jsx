@@ -1,10 +1,11 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 
 function FileUpload({ onFileUpload }) {
   const [selectedFile, setSelectedFile] = useState(null)
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState(null)
   const [dragActive, setDragActive] = useState(false)
+  const fileInputRef = useRef(null)
 
   const handleFileSelect = (file) => {
     const validTypes = [
@@ -69,6 +70,9 @@ function FileUpload({ onFileUpload }) {
     try {
       await onFileUpload(selectedFile)
       setSelectedFile(null)
+      if (fileInputRef.current) {
+        fileInputRef.current.value = ''
+      }
     } catch (err) {
       setError(err.response?.data?.detail || 'Error uploading file')
     } finally {
@@ -92,6 +96,7 @@ function FileUpload({ onFileUpload }) {
         onDrop={handleDrop}
       >
         <input
+          ref={fileInputRef}
           type="file"
           id="file-upload"
           className="hidden"

@@ -1,12 +1,16 @@
 import { useState, useRef, useEffect } from 'react'
+import { flushSync } from 'react-dom'
 import axios from 'axios'
 import MessageList from './MessageList'
 
-function ChatInterface({ uploadedFile, apiBaseUrl }) {
+function ChatInterface({ uploadedFile, apiBaseUrl, onClearChat }) {
   const [messages, setMessages] = useState([])
   const [inputMessage, setInputMessage] = useState('')
   const [sending, setSending] = useState(false)
   const messagesEndRef = useRef(null)
+  const welcomeShownForFile = useRef(null)
+  const streamingContentRef = useRef('')
+  const streamingThinkingRef = useRef([])
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -17,16 +21,23 @@ function ChatInterface({ uploadedFile, apiBaseUrl }) {
   }, [messages])
 
   useEffect(() => {
+    // Don't reset messages if we're in the middle of sending
+    if (sending) return
+
     // Add welcome message when file is uploaded
-    if (uploadedFile) {
+    if (uploadedFile && uploadedFile.file_path !== welcomeShownForFile.current) {
       const welcomeMessage = {
         role: 'assistant',
         content: `File "${uploadedFile.filename}" uploaded successfully! I can help you analyze this Excel file. Try asking me to:\n\n- Analyze the data statistics\n- Compare columns\n- Check for data quality issues\n- Create pivot tables\n- Generate charts\n- Detect trends or anomalies\n\nWhat would you like to know?`,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        id: Date.now()
       }
       setMessages([welcomeMessage])
+      welcomeShownForFile.current = uploadedFile.file_path
+    } else if (!uploadedFile) {
+      welcomeShownForFile.current = null
     }
-  }, [uploadedFile])
+  }, [uploadedFile, sending])
 
   const handleSendMessage = async (e) => {
     e.preventDefault()
@@ -44,43 +55,141 @@ function ChatInterface({ uploadedFile, apiBaseUrl }) {
     const userMessage = {
       role: 'user',
       content: inputMessage,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      id: Date.now()
     }
 
     setMessages(prev => [...prev, userMessage])
+    const userInputMessage = inputMessage
     setInputMessage('')
     setSending(true)
 
+    // Create placeholder for streaming response
+    const assistantMessageId = Date.now()
+    const assistantMessage = {
+      role: 'assistant',
+      content: '',
+      thinking_steps: [],  // Chain of thought events
+      timestamp: new Date().toISOString(),
+      id: assistantMessageId
+    }
+    setMessages(prev => [...prev, assistantMessage])
+
+    // Reset streaming refs for new message
+    streamingContentRef.current = ''
+    streamingThinkingRef.current = []
+
     try {
-      const response = await axios.post(`${apiBaseUrl}/chat`, {
-        message: inputMessage,
-        file_path: uploadedFile.file_path,
-        conversation_history: messages
+      // Use fetch for SSE streaming
+      const response = await fetch(`${apiBaseUrl}/chat/stream`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          message: userInputMessage,
+          file_path: uploadedFile.file_path,
+          conversation_history: messages
+        })
       })
 
-      // Add assistant response
-      const assistantMessage = {
-        role: 'assistant',
-        content: response.data.response,
-        timestamp: response.data.timestamp
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
       }
 
-      setMessages(prev => [...prev, assistantMessage])
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+
+      while (true) {
+        const { value, done } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = line.slice(6)
+
+            if (data === '[DONE]') {
+              break
+            }
+
+            try {
+              const parsed = JSON.parse(data)
+
+              if (parsed.error) {
+                setMessages(prev => prev.map(msg =>
+                  msg.id === assistantMessageId
+                    ? { ...msg, content: `Error: ${parsed.error}`, isError: true }
+                    : msg
+                ))
+                break
+              }
+
+              // Handle different event types
+              if (parsed.type === 'content' && parsed.content) {
+                // Text content chunk - accumulate in ref first
+                streamingContentRef.current += parsed.content
+
+                // Update state with accumulated content
+                setMessages(prev => prev.map(msg =>
+                  msg.id === assistantMessageId
+                    ? {
+                        ...msg,
+                        content: streamingContentRef.current,
+                        thinking_steps: streamingThinkingRef.current
+                      }
+                    : msg
+                ))
+              } else if (parsed.type && parsed.type !== 'content') {
+                // Chain of thought event - accumulate in ref first
+                streamingThinkingRef.current = [
+                  ...streamingThinkingRef.current,
+                  {
+                    ...parsed,
+                    timestamp: new Date().toISOString()
+                  }
+                ]
+
+                // Update state with accumulated thinking steps
+                setMessages(prev => prev.map(msg =>
+                  msg.id === assistantMessageId
+                    ? {
+                        ...msg,
+                        content: streamingContentRef.current,
+                        thinking_steps: streamingThinkingRef.current
+                      }
+                    : msg
+                ))
+              }
+            } catch (err) {
+              console.error('Error parsing SSE data:', err)
+            }
+          }
+        }
+      }
 
     } catch (error) {
       console.error('Error sending message:', error)
 
-      const errorMessage = {
-        role: 'assistant',
-        content: `Error: ${error.response?.data?.detail || 'Failed to get response from server'}`,
-        timestamp: new Date().toISOString(),
-        isError: true
-      }
-
-      setMessages(prev => [...prev, errorMessage])
+      setMessages(prev => prev.map(msg =>
+        msg.id === assistantMessageId
+          ? {
+              ...msg,
+              content: `Error: ${error.message || 'Failed to get response from server'}`,
+              isError: true
+            }
+          : msg
+      ))
 
     } finally {
       setSending(false)
+      // Clear streaming refs after completion
+      streamingContentRef.current = ''
+      streamingThinkingRef.current = []
     }
   }
 
@@ -94,6 +203,9 @@ function ChatInterface({ uploadedFile, apiBaseUrl }) {
   const clearChat = () => {
     if (window.confirm('Are you sure you want to clear the chat history?')) {
       setMessages([])
+      if (onClearChat) {
+        onClearChat()
+      }
     }
   }
 

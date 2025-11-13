@@ -16,7 +16,8 @@ from .utils import (
     load_workbook,
     load_dataframe,
     save_workbook,
-    validate_sheet_name
+    validate_sheet_name,
+    serialize_dataframe_for_json
 )
 
 
@@ -73,7 +74,7 @@ def create_pivot_table(
     return {
         'message': f"Pivot table created in sheet '{target_sheet}' successfully",
         'pivot_shape': {'rows': pivot.shape[0], 'columns': pivot.shape[1]},
-        'preview': pivot.head(10).to_dict() if hasattr(pivot, 'head') else str(pivot)
+        'preview': serialize_dataframe_for_json(pivot.head(10)) if hasattr(pivot, 'head') else str(pivot)
     }
 
 
