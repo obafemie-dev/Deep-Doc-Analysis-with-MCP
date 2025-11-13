@@ -2,8 +2,10 @@ import { useState, useRef, useEffect } from 'react'
 import { flushSync } from 'react-dom'
 import axios from 'axios'
 import MessageList from './MessageList'
+import { useAnalytics } from '../hooks/useAnalytics'
 
 function ChatInterface({ uploadedFile, apiBaseUrl, onClearChat }) {
+  const { sessionId, trackQuery, trackClearChat } = useAnalytics()
   const [messages, setMessages] = useState([])
   const [inputMessage, setInputMessage] = useState('')
   const [sending, setSending] = useState(false)
@@ -64,6 +66,9 @@ function ChatInterface({ uploadedFile, apiBaseUrl, onClearChat }) {
     setInputMessage('')
     setSending(true)
 
+    // Track query in analytics
+    trackQuery(userInputMessage, uploadedFile?.file_path, messages.length / 2 + 1)
+
     // Create placeholder for streaming response
     const assistantMessageId = Date.now()
     const assistantMessage = {
@@ -85,6 +90,7 @@ function ChatInterface({ uploadedFile, apiBaseUrl, onClearChat }) {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'X-Session-ID': sessionId,
         },
         body: JSON.stringify({
           message: userInputMessage,
@@ -202,6 +208,9 @@ function ChatInterface({ uploadedFile, apiBaseUrl, onClearChat }) {
 
   const clearChat = () => {
     if (window.confirm('Are you sure you want to clear the chat history?')) {
+      // Track clear chat event
+      trackClearChat(messages.length)
+
       setMessages([])
       if (onClearChat) {
         onClearChat()

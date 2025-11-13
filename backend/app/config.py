@@ -22,6 +22,12 @@ class Settings(BaseSettings):
     # MCP Server Settings
     MCP_SERVER_NAME: str = "Excel Analysis Server"
 
+    # Analytics Settings
+    ANALYTICS_ENABLED: bool = True
+    ANALYTICS_DB_URL: str = "sqlite+aiosqlite:///./analytics.db"
+    ANALYTICS_BATCH_SIZE: int = 100
+    ANALYTICS_RETENTION_DAYS: int = 90
+
     class Config:
         env_file = ".env"
         case_sensitive = True
