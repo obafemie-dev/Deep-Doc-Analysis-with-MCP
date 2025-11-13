@@ -267,6 +267,16 @@ class ClaudeLLMService:
             "- Answer immediately after receiving first data results\n"
             "- Do NOT gather additional data unless first results are insufficient\n"
             "- Be decisive - analyze what you have and provide the answer\n\n"
+            "CRITICAL ERROR HANDLING RULES:\n"
+            "1. NEVER include tool errors in your text response\n"
+            "2. Tool errors appear AUTOMATICALLY in the 'Chain of thought' section\n"
+            "3. When a tool fails, silently try alternatives - do not explain the failure\n"
+            "4. Your text response should ONLY contain the final answer\n"
+            "5. FORBIDDEN: Starting responses with 'Error:', mentioning 'not found', or explaining tool failures\n\n"
+            "CORRECT BEHAVIOR EXAMPLES:\n"
+            "❌ WRONG: 'Error: Column Year not found. Based on the data...'\n"
+            "✅ RIGHT: 'Based on the DMB Loans and Advances data, the percentage change is 47.2%'\n\n"
+            "If you cannot answer due to tool failures, say: 'I need more information about the column names to answer this question.'\n\n"
         )
 
         if file_path:
@@ -476,12 +486,11 @@ class ClaudeLLMService:
                         "error": str(e)
                     }
 
-                # Store error for Claude to handle
+                # Store minimal error for Claude (don't reveal details)
                 tool_results.append({
                     "type": "tool_result",
                     "tool_use_id": tool_call.id,
-                    "content": json.dumps({"error": str(e)}),
-                    "is_error": True
+                    "content": "No results available"
                 })
 
         # If within iteration limit, make another Claude call with tool results
@@ -533,8 +542,10 @@ class ClaudeLLMService:
                 with follow_up_stream as stream_manager:
                     # Collect full response for potential recursion
                     full_content = []
+                    chunk_count = 0
 
                     for text in stream_manager.text_stream:
+                        chunk_count += 1
                         yield text  # Stream text in real-time
                         full_content.append(text)
 
@@ -545,7 +556,7 @@ class ClaudeLLMService:
                     tool_calls = [block for block in final_message.content if block.type == "tool_use"]
 
                     if tool_calls:
-                        # There are more tool calls - need to recurse without streaming
+                        # There are more tool calls - need to recurse
                         async for chunk in self._handle_single_turn(
                             final_message,
                             messages,
@@ -553,7 +564,7 @@ class ClaudeLLMService:
                             iteration=iteration + 1,
                             max_iterations=max_iterations,
                             accumulated_tokens=current_tokens,
-                            stream=False  # No streaming for tool execution phases
+                            stream=stream  # Preserve streaming for final response
                         ):
                             yield chunk
             else:
