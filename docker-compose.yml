@@ -1,21 +1,22 @@
 version: '3.8'
 
 services:
-  # Ollama service for running LLM
-  ollama:
-    image: ollama/ollama:latest
-    container_name: deep-doc-ollama
-    ports:
-      - "11434:11434"
-    volumes:
-      - ollama_data:/root/.ollama
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
+  # Ollama service for running LLM (DISABLED - Using Claude API)
+  # Uncomment below if you want to use Ollama instead of Claude
+  # ollama:
+  #   image: ollama/ollama:latest
+  #   container_name: deep-doc-ollama
+  #   ports:
+  #     - "11434:11434"
+  #   volumes:
+  #     - ollama_data:/root/.ollama
+  #   restart: unless-stopped
+  #   healthcheck:
+  #     test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
+  #     start_period: 60s
 
   # Backend FastAPI service
   backend:
@@ -28,13 +29,13 @@ services:
     volumes:
       - ./uploads:/app/uploads
       - ./backend/app:/app/app  # For development hot-reload
+    env_file:
+      - .env
     environment:
       - OLLAMA_BASE_URL=http://ollama:11434
-      - OLLAMA_MODEL=qwen2.5:1.5b-instruct
       - UPLOAD_DIR=/app/uploads
-      - PYTHONUNBUFFERED=1
-    depends_on:
-      - ollama
+    # depends_on:
+    #   - ollama
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
@@ -57,9 +58,9 @@ services:
       - backend
     restart: unless-stopped
 
-volumes:
-  ollama_data:
-    driver: local
+# volumes:
+#   ollama_data:
+#     driver: local
 
 networks:
   default:
