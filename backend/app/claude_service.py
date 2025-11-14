@@ -6,7 +6,7 @@ import logging
 from anthropic import Anthropic
 from typing import List, Dict, Any, Optional, AsyncGenerator
 from .config import settings
-from .models import ChatMessage
+from .schemas import ChatMessage
 from .mcp_server import mcp_server
 from .mcp_server.utils import coerce_string_to_type
 
@@ -485,6 +485,36 @@ class ClaudeLLMService:
                         "tool_name": function_name,
                         "error": str(e)
                     }
+
+                # Log error to analytics
+                if settings.ANALYTICS_ENABLED:
+                    try:
+                        import traceback
+                        from .database import AsyncSessionLocal
+                        from .services.analytics_service import AnalyticsService
+
+                        async with AsyncSessionLocal() as db:
+                            try:
+                                analytics = AnalyticsService(db)
+                                await analytics.log_error(
+                                    session_id=None,  # Session ID not available in claude_service
+                                    error_type=type(e).__name__,
+                                    error_message=str(e),
+                                    stack_trace=traceback.format_exc(),
+                                    endpoint=f"tool:{function_name}",
+                                    request_data={
+                                        "tool_name": function_name,
+                                        "tool_params": tool_call.input if hasattr(tool_call, 'input') else {}
+                                    }
+                                )
+                                await db.commit()
+                            except Exception:
+                                await db.rollback()
+                                raise
+                            finally:
+                                await db.close()
+                    except Exception as log_error:
+                        logger.error(f"Failed to log tool error to analytics: {log_error}")
 
                 # Store minimal error for Claude (don't reveal details)
                 tool_results.append({

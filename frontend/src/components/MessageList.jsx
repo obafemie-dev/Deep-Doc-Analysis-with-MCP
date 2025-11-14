@@ -1,4 +1,5 @@
 import ThinkingSteps from './ThinkingSteps'
+import FeedbackButtons from './FeedbackButtons'
 
 function MessageList({ messages }) {
   const formatTimestamp = (timestamp) => {
@@ -62,6 +63,14 @@ function MessageList({ messages }) {
               className="text-sm whitespace-pre-wrap"
               dangerouslySetInnerHTML={{ __html: formatContent(message.content) }}
             />
+
+            {/* Feedback Buttons - Only for assistant messages */}
+            {message.role === 'assistant' && !message.isError && message.content && (
+              <FeedbackButtons
+                messageId={String(message.id || message.timestamp || Date.now())}
+                queryEventId={null}
+              />
+            )}
           </div>
         </div>
       ))}

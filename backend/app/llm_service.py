@@ -5,7 +5,7 @@ import json
 import ollama
 from typing import List, Dict, Any, Optional, AsyncGenerator
 from .config import settings
-from .models import ChatMessage
+from .schemas import ChatMessage
 from .mcp_server import mcp_server
 
 

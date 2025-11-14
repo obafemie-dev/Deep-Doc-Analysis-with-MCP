@@ -13,7 +13,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 import logging
 
 from .config import settings
-from .models import (
+from .schemas import (
     ChatRequest,
     ChatResponse,
     FileUploadResponse,
@@ -21,6 +21,11 @@ from .models import (
 )
 from .llm_service import llm_service
 from .claude_service import claude_service
+from .database import init_analytics_db
+from .middleware.analytics_middleware import AnalyticsMiddleware
+from .routers import analytics
+# Import models to register them with SQLAlchemy Base.metadata before init_analytics_db
+from .models import analytics as analytics_models  # noqa: F401
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -45,9 +50,43 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Add analytics middleware (if enabled)
+if settings.ANALYTICS_ENABLED:
+    app.add_middleware(AnalyticsMiddleware)
+    logger.info("Analytics middleware enabled")
+
+# Include analytics router
+app.include_router(analytics.router)
+
 # Ensure upload directory exists
 UPLOAD_DIR = Path(settings.UPLOAD_DIR)
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+
+# ============================================================================
+# STARTUP & SHUTDOWN EVENTS
+# ============================================================================
+
+@app.on_event("startup")
+async def startup_event():
+    """Initialize application on startup"""
+    logger.info("Starting application...")
+
+    # Initialize analytics database
+    if settings.ANALYTICS_ENABLED:
+        try:
+            await init_analytics_db()
+            logger.info("Analytics database initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize analytics database: {e}")
+
+    logger.info("Application started successfully")
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Cleanup on application shutdown"""
+    logger.info("Shutting down application...")
 
 
 # ============================================================================
@@ -404,8 +443,37 @@ async def list_available_tools():
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request, exc):
-    """Global exception handler"""
+    """Global exception handler with analytics logging"""
+    import traceback
     logger.error(f"Unhandled exception: {exc}", exc_info=True)
+
+    # Log error to analytics (async, non-blocking)
+    if settings.ANALYTICS_ENABLED:
+        try:
+            from .database import AsyncSessionLocal
+            from .services.analytics_service import AnalyticsService
+
+            session_id = request.headers.get("X-Session-ID")
+
+            async def log_error_async():
+                async with AsyncSessionLocal() as db:
+                    analytics = AnalyticsService(db)
+                    await analytics.log_error(
+                        session_id=session_id,
+                        error_type=type(exc).__name__,
+                        error_message=str(exc),
+                        stack_trace=traceback.format_exc(),
+                        endpoint=str(request.url.path),
+                        request_data={
+                            "method": request.method,
+                            "url": str(request.url)
+                        }
+                    )
+                    await db.commit()
+
+            asyncio.create_task(log_error_async())
+        except Exception as e:
+            logger.error(f"Failed to log error to analytics: {e}")
 
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

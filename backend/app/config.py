@@ -27,19 +27,25 @@ class Settings(BaseSettings):
     MAX_FILE_SIZE: int = 50 * 1024 * 1024  # 50MB
     ALLOWED_EXTENSIONS: set[str] = {".xlsx", ".xls", ".xlsm"}
 
-    # LLM Settings
-    LLM_PROVIDER: str = "claude"  # "ollama" or "claude"
+    # LLM Provider Settings
+    LLM_PROVIDER: str = "claude"  # "claude" or "ollama"
 
     # Ollama Settings
     OLLAMA_BASE_URL: str = "http://localhost:11434"
     OLLAMA_MODEL: str = "qwen2.5:3b"
 
     # Claude Settings
-    ANTHROPIC_API_KEY: str = ""
     CLAUDE_MODEL: str = "claude-sonnet-4-20250514"
+    ANTHROPIC_API_KEY: Optional[str] = None  # Used by claude_service.py
 
     # MCP Server Settings
     MCP_SERVER_NAME: str = "Excel Analysis Server"
+
+    # Analytics Settings
+    ANALYTICS_ENABLED: bool = True
+    ANALYTICS_DB_URL: str = "sqlite+aiosqlite:///./analytics.db"
+    ANALYTICS_BATCH_SIZE: int = 100
+    ANALYTICS_RETENTION_DAYS: int = 90
 
     class Config:
         env_file = ".env"
