@@ -28,9 +28,11 @@ services:
     volumes:
       - ./uploads:/app/uploads
       - ./backend/app:/app/app  # For development hot-reload
+      - analytics_db:/app  # Shared volume for analytics.db
+    env_file:
+      - .env
     environment:
       - OLLAMA_BASE_URL=http://ollama:11434
-      - OLLAMA_MODEL=qwen2.5:1.5b-instruct
       - UPLOAD_DIR=/app/uploads
       - PYTHONUNBUFFERED=1
     depends_on:
@@ -57,8 +59,28 @@ services:
       - backend
     restart: unless-stopped
 
+  # Metabase Analytics Dashboard (localhost only)
+  metabase:
+    image: metabase/metabase:latest
+    container_name: deep-doc-metabase
+    ports:
+      - "127.0.0.1:3001:3000"  # Only accessible from host machine
+    environment:
+      - MB_DB_TYPE=h2
+      - MB_DB_FILE=/metabase-data/metabase.db
+    volumes:
+      - metabase_data:/metabase-data
+      - analytics_db:/analytics:ro  # Mount analytics DB as read-only
+    depends_on:
+      - backend
+    restart: unless-stopped
+
 volumes:
   ollama_data:
+    driver: local
+  metabase_data:
+    driver: local
+  analytics_db:
     driver: local
 
 networks:

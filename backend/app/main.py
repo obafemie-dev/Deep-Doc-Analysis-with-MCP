@@ -13,7 +13,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 import logging
 
 from .config import settings
-from .models import (
+from .schemas import (
     ChatRequest,
     ChatResponse,
     FileUploadResponse,

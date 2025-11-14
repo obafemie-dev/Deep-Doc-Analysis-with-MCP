@@ -108,6 +108,24 @@ export const useAnalytics = () => {
   }, [trackEvent]);
 
   /**
+   * Track AI response
+   *
+   * @param {string} responseText - The AI's response
+   * @param {array} toolCalls - Tools used during response
+   * @param {number} duration - Response time in ms
+   * @param {boolean} success - Whether response succeeded
+   */
+  const trackResponse = useCallback(async (responseText, toolCalls = [], duration = 0, success = true) => {
+    await trackEvent('response', {
+      response_text: responseText.substring(0, 500),
+      tool_calls: toolCalls,
+      success
+    }, {
+      total_duration_ms: duration
+    });
+  }, [trackEvent]);
+
+  /**
    * Track clear chat event
    *
    * @param {number} messageCount - Number of messages before clearing
@@ -124,6 +142,7 @@ export const useAnalytics = () => {
     submitFeedback,
     trackFileUpload,
     trackQuery,
+    trackResponse,
     trackClearChat
   };
 };

@@ -5,7 +5,7 @@ import json
 import ollama
 from typing import List, Dict, Any, Optional, AsyncGenerator
 from .config import settings
-from .models import ChatMessage
+from .schemas import ChatMessage
 from .mcp_server import mcp_server
 
 
@@ -81,7 +81,7 @@ class LLMService:
         conversation_history: List[ChatMessage],
         file_path: Optional[str] = None,
         stream: bool = False
-    ) -> AsyncGenerator[str, None] | str:
+    ) -> AsyncGenerator[str, None]:
         """
         Process chat message with LLM and MCP tools
 
@@ -139,8 +139,9 @@ class LLMService:
             async for chunk in self._handle_streaming_response(response):
                 yield chunk
         else:
-            # Handle complete response
-            return await self._handle_response(response, messages)
+            # Handle complete response (yield as single chunk)
+            result = await self._handle_response(response, messages)
+            yield result
 
     async def _handle_response(
         self,
