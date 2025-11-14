@@ -5,7 +5,7 @@ import MessageList from './MessageList'
 import { useAnalytics } from '../hooks/useAnalytics'
 
 function ChatInterface({ uploadedFile, apiBaseUrl, onClearChat }) {
-  const { sessionId, trackQuery, trackClearChat } = useAnalytics()
+  const { sessionId, trackQuery, trackResponse, trackClearChat } = useAnalytics()
   const [messages, setMessages] = useState([])
   const [inputMessage, setInputMessage] = useState('')
   const [sending, setSending] = useState(false)
@@ -13,6 +13,7 @@ function ChatInterface({ uploadedFile, apiBaseUrl, onClearChat }) {
   const welcomeShownForFile = useRef(null)
   const streamingContentRef = useRef('')
   const streamingThinkingRef = useRef([])
+  const streamingErrorsRef = useRef([])
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -53,12 +54,13 @@ function ChatInterface({ uploadedFile, apiBaseUrl, onClearChat }) {
       return
     }
 
-    // Add user message
+    // Add user message with unique ID
+    const userMessageId = Date.now()
     const userMessage = {
       role: 'user',
       content: inputMessage,
       timestamp: new Date().toISOString(),
-      id: Date.now()
+      id: userMessageId
     }
 
     setMessages(prev => [...prev, userMessage])
@@ -69,8 +71,9 @@ function ChatInterface({ uploadedFile, apiBaseUrl, onClearChat }) {
     // Track query in analytics
     trackQuery(userInputMessage, uploadedFile?.file_path, messages.length / 2 + 1)
 
-    // Create placeholder for streaming response
-    const assistantMessageId = Date.now()
+    // Create placeholder for streaming response with guaranteed unique ID
+    const assistantMessageId = userMessageId + 1
+    const startTime = Date.now()
     const assistantMessage = {
       role: 'assistant',
       content: '',
@@ -83,6 +86,7 @@ function ChatInterface({ uploadedFile, apiBaseUrl, onClearChat }) {
     // Reset streaming refs for new message
     streamingContentRef.current = ''
     streamingThinkingRef.current = []
+    streamingErrorsRef.current = []
 
     try {
       // Use fetch for SSE streaming
@@ -127,12 +131,10 @@ function ChatInterface({ uploadedFile, apiBaseUrl, onClearChat }) {
               const parsed = JSON.parse(data)
 
               if (parsed.error) {
-                setMessages(prev => prev.map(msg =>
-                  msg.id === assistantMessageId
-                    ? { ...msg, content: `Error: ${parsed.error}`, isError: true }
-                    : msg
-                ))
-                break
+                // Accumulate errors to show user if no valid content received
+                console.error('Stream error:', parsed.error)
+                streamingErrorsRef.current.push(parsed.error)
+                continue
               }
 
               // Handle different event types
@@ -193,9 +195,33 @@ function ChatInterface({ uploadedFile, apiBaseUrl, onClearChat }) {
 
     } finally {
       setSending(false)
-      // Clear streaming refs after completion
+
+      // Track response analytics (save refs before clearing)
+      const responseTime = Date.now() - startTime
+      const toolCalls = streamingThinkingRef.current.filter(s => s.type === 'tool_use')
+      const responseContent = streamingContentRef.current
+      const streamErrors = streamingErrorsRef.current
+
+      // If no content received but errors occurred, show error to user
+      if (responseContent.length === 0 && streamErrors.length > 0) {
+        setMessages(prev => prev.map(msg =>
+          msg.id === assistantMessageId
+            ? { ...msg, content: `Error: ${streamErrors[0]}`, isError: true }
+            : msg
+        ))
+      }
+
+      trackResponse(
+        responseContent,
+        toolCalls,
+        responseTime,
+        responseContent.length > 0
+      )
+
+      // Clear streaming refs to prevent memory leak (always cleanup)
       streamingContentRef.current = ''
       streamingThinkingRef.current = []
+      streamingErrorsRef.current = []
     }
   }
 

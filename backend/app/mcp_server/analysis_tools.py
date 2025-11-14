@@ -117,6 +117,17 @@ def analyze_excel_data(
     # Get numeric columns for statistical analysis
     numeric_df = df.select_dtypes(include=[np.number])
 
+    # Prevent "Cannot describe a DataFrame without columns" error
+    if len(numeric_df.columns) == 0:
+        # No numeric columns - return informative response
+        return {
+            'message': 'No numeric columns found in the selected data',
+            'available_columns': df.columns.tolist(),
+            'data_types': df.dtypes.astype(str).to_dict(),
+            'shape': {'rows': df.shape[0], 'columns': df.shape[1]},
+            'suggestion': 'This dataset contains only text/categorical data. Try using query_excel_data() to retrieve specific rows instead of analyze_excel_data().'
+        }
+
     analysis = {
         'summary_statistics': numeric_df.describe().to_dict(),
         'null_counts': df.isnull().sum().to_dict(),

@@ -22,7 +22,7 @@ class AnalyticsEvent(Base):
     session_id = Column(String(36), nullable=False, index=True)
     timestamp = Column(DateTime, server_default=func.now(), index=True)
     data = Column(JSON, default={})  # Event-specific data
-    metadata = Column(JSON, default={})  # Performance metrics, context
+    event_metadata = Column(JSON, default={})  # Performance metrics, context
 
     # Composite index for common queries
     __table_args__ = (
@@ -91,6 +91,11 @@ class ErrorLog(Base):
     endpoint = Column(String(200), nullable=True)
     request_data = Column(JSON, nullable=True)  # Request body, params
     timestamp = Column(DateTime, server_default=func.now(), index=True)
+
+    # Composite index for common query pattern (filter by session and time range)
+    __table_args__ = (
+        Index('idx_error_session_time', 'session_id', 'timestamp'),
+    )
 
     def __repr__(self):
         return f"<ErrorLog(id={self.id}, type={self.error_type}, session={self.session_id})>"

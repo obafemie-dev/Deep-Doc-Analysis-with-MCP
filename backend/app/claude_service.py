@@ -6,7 +6,7 @@ import logging
 from anthropic import Anthropic
 from typing import List, Dict, Any, Optional, AsyncGenerator
 from .config import settings
-from .models import ChatMessage
+from .schemas import ChatMessage
 from .mcp_server import mcp_server
 from .mcp_server.utils import coerce_string_to_type
 
@@ -267,6 +267,16 @@ class ClaudeLLMService:
             "- Answer immediately after receiving first data results\n"
             "- Do NOT gather additional data unless first results are insufficient\n"
             "- Be decisive - analyze what you have and provide the answer\n\n"
+            "CRITICAL ERROR HANDLING RULES:\n"
+            "1. NEVER include tool errors in your text response\n"
+            "2. Tool errors appear AUTOMATICALLY in the 'Chain of thought' section\n"
+            "3. When a tool fails, silently try alternatives - do not explain the failure\n"
+            "4. Your text response should ONLY contain the final answer\n"
+            "5. FORBIDDEN: Starting responses with 'Error:', mentioning 'not found', or explaining tool failures\n\n"
+            "CORRECT BEHAVIOR EXAMPLES:\n"
+            "❌ WRONG: 'Error: Column Year not found. Based on the data...'\n"
+            "✅ RIGHT: 'Based on the DMB Loans and Advances data, the percentage change is 47.2%'\n\n"
+            "If you cannot answer due to tool failures, say: 'I need more information about the column names to answer this question.'\n\n"
         )
 
         if file_path:
@@ -476,12 +486,41 @@ class ClaudeLLMService:
                         "error": str(e)
                     }
 
-                # Store error for Claude to handle
+                # Log error to analytics
+                if settings.ANALYTICS_ENABLED:
+                    try:
+                        import traceback
+                        from .database import AsyncSessionLocal
+                        from .services.analytics_service import AnalyticsService
+
+                        async with AsyncSessionLocal() as db:
+                            try:
+                                analytics = AnalyticsService(db)
+                                await analytics.log_error(
+                                    session_id=None,  # Session ID not available in claude_service
+                                    error_type=type(e).__name__,
+                                    error_message=str(e),
+                                    stack_trace=traceback.format_exc(),
+                                    endpoint=f"tool:{function_name}",
+                                    request_data={
+                                        "tool_name": function_name,
+                                        "tool_params": tool_call.input if hasattr(tool_call, 'input') else {}
+                                    }
+                                )
+                                await db.commit()
+                            except Exception:
+                                await db.rollback()
+                                raise
+                            finally:
+                                await db.close()
+                    except Exception as log_error:
+                        logger.error(f"Failed to log tool error to analytics: {log_error}")
+
+                # Store minimal error for Claude (don't reveal details)
                 tool_results.append({
                     "type": "tool_result",
                     "tool_use_id": tool_call.id,
-                    "content": json.dumps({"error": str(e)}),
-                    "is_error": True
+                    "content": "No results available"
                 })
 
         # If within iteration limit, make another Claude call with tool results

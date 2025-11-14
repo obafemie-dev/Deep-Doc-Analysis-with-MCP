@@ -30,7 +30,8 @@ class AnalyticsService:
         metadata: Optional[Dict[str, Any]] = None
     ) -> AnalyticsEvent:
         """
-        Log an analytics event.
+        Log an analytics event with automatic session metric updates.
+        All operations are executed atomically within a nested transaction.
 
         Args:
             event_type: Type of event (query, response, error, etc.)
@@ -41,15 +42,40 @@ class AnalyticsService:
         Returns:
             Created AnalyticsEvent
         """
-        event = AnalyticsEvent(
-            event_type=event_type,
-            session_id=session_id,
-            data=data or {},
-            metadata=metadata or {}
-        )
-        self.db.add(event)
-        await self.db.flush()
-        await self.db.refresh(event)
+        # Use nested transaction (SAVEPOINT) for atomicity
+        async with self.db.begin_nested():
+            # Create and insert event
+            event = AnalyticsEvent(
+                event_type=event_type,
+                session_id=session_id,
+                data=data or {},
+                event_metadata=metadata or {}
+            )
+            self.db.add(event)
+            await self.db.flush()
+            await self.db.refresh(event)
+
+            # Auto-update session metrics based on event type (all atomic)
+            if event_type in ['query', 'response']:
+                await self.increment_message_count(session_id)
+
+            if event_type == 'response' and metadata:
+                # Add response duration to total query time (atomic increment)
+                duration_ms = metadata.get('total_duration_ms', 0)
+                if duration_ms > 0:
+                    # Use atomic database-level increment to prevent race conditions
+                    stmt = (
+                        update(Session)
+                        .where(Session.id == session_id)
+                        .values(
+                            total_query_time_ms=Session.total_query_time_ms + duration_ms,
+                            last_activity_at=datetime.utcnow()
+                        )
+                    )
+                    await self.db.execute(stmt)
+
+            if event_type == 'upload':
+                await self.increment_file_count(session_id)
 
         logger.info(f"Event logged: {event_type} for session {session_id}")
         return event
@@ -181,14 +207,40 @@ class AnalyticsService:
         session_id: str,
         **updates
     ):
-        """Update session data"""
+        """
+        Update session data with input validation.
+        Only whitelisted fields can be updated to prevent injection attacks.
+
+        Args:
+            session_id: Session UUID
+            **updates: Field updates (only whitelisted fields allowed)
+
+        Raises:
+            ValueError: If attempting to update non-whitelisted field
+        """
+        # Whitelist of allowed fields for security
+        ALLOWED_FIELDS = {
+            'message_count',
+            'file_count',
+            'total_query_time_ms',
+            'llm_provider',
+            'ended_at'
+        }
+
+        # Validate and filter updates
+        safe_updates = {}
+        for key, value in updates.items():
+            if key not in ALLOWED_FIELDS:
+                raise ValueError(f"Cannot update field '{key}' - not in whitelist")
+            safe_updates[key] = value
+
         # Always update last_activity_at
-        updates['last_activity_at'] = datetime.utcnow()
+        safe_updates['last_activity_at'] = datetime.utcnow()
 
         stmt = (
             update(Session)
             .where(Session.id == session_id)
-            .values(**updates)
+            .values(**safe_updates)
         )
         await self.db.execute(stmt)
 
@@ -348,7 +400,7 @@ class AnalyticsService:
         avg_time_stmt = select(
             func.avg(
                 func.cast(
-                    func.json_extract(AnalyticsEvent.metadata, '$.total_duration_ms'),
+                    func.json_extract(AnalyticsEvent.event_metadata, '$.total_duration_ms'),
                     Integer
                 )
             )
