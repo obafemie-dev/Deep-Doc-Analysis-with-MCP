@@ -3,20 +3,85 @@ import { flushSync } from 'react-dom'
 import axios from 'axios'
 import MessageList from './MessageList'
 import { useAnalytics } from '../hooks/useAnalytics'
+import { 
+  PromptInput,
+  PromptInputBody,
+  PromptInputTextarea,
+  PromptInputFooter,
+  PromptInputSubmit,
+  PromptInputTools,
+  PromptInputButton
+} from '@/components/ai-elements/prompt-input'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
+import { PaperclipIcon, XIcon, ArrowUp } from 'lucide-react'
 
-function ChatInterface({ uploadedFile, apiBaseUrl, onClearChat }) {
+function ChatInterface({ uploadedFile, apiBaseUrl, onClearChat, onFileUpload }) {
   const { sessionId, trackQuery, trackResponse, trackClearChat } = useAnalytics()
   const [messages, setMessages] = useState([])
-  const [inputMessage, setInputMessage] = useState('')
   const [sending, setSending] = useState(false)
+  const [uploading, setUploading] = useState(false)
+  const [uploadError, setUploadError] = useState(null)
   const messagesEndRef = useRef(null)
   const welcomeShownForFile = useRef(null)
   const streamingContentRef = useRef('')
   const streamingThinkingRef = useRef([])
   const streamingErrorsRef = useRef([])
+  const fileInputRef = useRef(null)
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }
+
+  // Handle file selection
+  const handleFileSelect = async (file) => {
+    const validTypes = [
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', // .xlsx
+      'application/vnd.ms-excel', // .xls
+      'application/vnd.ms-excel.sheet.macroEnabled.12' // .xlsm
+    ]
+
+    if (!validTypes.includes(file.type) && !file.name.match(/\.(xlsx|xls|xlsm)$/i)) {
+      setUploadError('Please select a valid Excel file (.xlsx, .xls, .xlsm)')
+      setTimeout(() => setUploadError(null), 3000)
+      return
+    }
+
+    if (file.size > 50 * 1024 * 1024) {
+      setUploadError('File size must be less than 50MB')
+      setTimeout(() => setUploadError(null), 3000)
+      return
+    }
+
+    setUploadError(null)
+    setUploading(true)
+
+    try {
+      await onFileUpload(file)
+    } catch (err) {
+      setUploadError(err.response?.data?.detail || 'Error uploading file')
+      setTimeout(() => setUploadError(null), 3000)
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  const handleAttachmentClick = () => {
+    fileInputRef.current?.click()
+  }
+
+  const handleFileChange = (e) => {
+    if (e.target.files && e.target.files[0]) {
+      handleFileSelect(e.target.files[0])
+    }
+  }
+
+  const handleRemoveFile = () => {
+    if (onClearChat) {
+      onClearChat()
+    }
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ''
+    }
   }
 
   useEffect(() => {
@@ -24,10 +89,8 @@ function ChatInterface({ uploadedFile, apiBaseUrl, onClearChat }) {
   }, [messages])
 
   useEffect(() => {
-    // Don't reset messages if we're in the middle of sending
     if (sending) return
 
-    // Add welcome message when file is uploaded
     if (uploadedFile && uploadedFile.file_path !== welcomeShownForFile.current) {
       const welcomeMessage = {
         role: 'assistant',
@@ -42,10 +105,8 @@ function ChatInterface({ uploadedFile, apiBaseUrl, onClearChat }) {
     }
   }, [uploadedFile, sending])
 
-  const handleSendMessage = async (e) => {
-    e.preventDefault()
-
-    if (!inputMessage.trim()) {
+  const handleSendMessage = async (userInputMessage) => {
+    if (!userInputMessage.trim()) {
       return
     }
 
@@ -54,42 +115,35 @@ function ChatInterface({ uploadedFile, apiBaseUrl, onClearChat }) {
       return
     }
 
-    // Add user message with unique ID
     const userMessageId = Date.now()
     const userMessage = {
       role: 'user',
-      content: inputMessage,
+      content: userInputMessage,
       timestamp: new Date().toISOString(),
       id: userMessageId
     }
 
     setMessages(prev => [...prev, userMessage])
-    const userInputMessage = inputMessage
-    setInputMessage('')
     setSending(true)
 
-    // Track query in analytics
     trackQuery(userInputMessage, uploadedFile?.file_path, messages.length / 2 + 1)
 
-    // Create placeholder for streaming response with guaranteed unique ID
     const assistantMessageId = userMessageId + 1
     const startTime = Date.now()
     const assistantMessage = {
       role: 'assistant',
       content: '',
-      thinking_steps: [],  // Chain of thought events
+      thinking_steps: [],
       timestamp: new Date().toISOString(),
       id: assistantMessageId
     }
     setMessages(prev => [...prev, assistantMessage])
 
-    // Reset streaming refs for new message
     streamingContentRef.current = ''
     streamingThinkingRef.current = []
     streamingErrorsRef.current = []
 
     try {
-      // Use fetch for SSE streaming
       const response = await fetch(`${apiBaseUrl}/chat/stream`, {
         method: 'POST',
         headers: {
@@ -137,18 +191,14 @@ function ChatInterface({ uploadedFile, apiBaseUrl, onClearChat }) {
               const parsed = JSON.parse(data)
 
               if (parsed.error) {
-                // Accumulate errors to show user if no valid content received
                 console.error('Stream error:', parsed.error)
                 streamingErrorsRef.current.push(parsed.error)
                 continue
               }
 
-              // Handle different event types
               if (parsed.type === 'content' && parsed.content) {
-                // Text content chunk - accumulate in ref first
                 streamingContentRef.current += parsed.content
 
-                // Update state with accumulated content
                 setMessages(prev => prev.map(msg =>
                   msg.id === assistantMessageId
                     ? {
@@ -159,7 +209,6 @@ function ChatInterface({ uploadedFile, apiBaseUrl, onClearChat }) {
                     : msg
                 ))
               } else if (parsed.type && parsed.type !== 'content') {
-                // Chain of thought event - accumulate in ref first
                 streamingThinkingRef.current = [
                   ...streamingThinkingRef.current,
                   {
@@ -168,7 +217,6 @@ function ChatInterface({ uploadedFile, apiBaseUrl, onClearChat }) {
                   }
                 ]
 
-                // Update state with accumulated thinking steps
                 setMessages(prev => prev.map(msg =>
                   msg.id === assistantMessageId
                     ? {
@@ -202,13 +250,11 @@ function ChatInterface({ uploadedFile, apiBaseUrl, onClearChat }) {
     } finally {
       setSending(false)
 
-      // Track response analytics (save refs before clearing)
       const responseTime = Date.now() - startTime
       const toolCalls = streamingThinkingRef.current.filter(s => s.type === 'tool_use')
       const responseContent = streamingContentRef.current
       const streamErrors = streamingErrorsRef.current
 
-      // If no content received but errors occurred, show error to user
       if (responseContent.length === 0 && streamErrors.length > 0) {
         setMessages(prev => prev.map(msg =>
           msg.id === assistantMessageId
@@ -224,23 +270,14 @@ function ChatInterface({ uploadedFile, apiBaseUrl, onClearChat }) {
         responseContent.length > 0
       )
 
-      // Clear streaming refs to prevent memory leak (always cleanup)
       streamingContentRef.current = ''
       streamingThinkingRef.current = []
       streamingErrorsRef.current = []
     }
   }
 
-  const handleKeyPress = (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      handleSendMessage(e)
-    }
-  }
-
   const clearChat = () => {
     if (window.confirm('Are you sure you want to clear the chat history?')) {
-      // Track clear chat event
       trackClearChat(messages.length)
 
       setMessages([])
@@ -251,53 +288,41 @@ function ChatInterface({ uploadedFile, apiBaseUrl, onClearChat }) {
   }
 
   return (
-    <div className="bg-white rounded-lg shadow-sm flex flex-col h-[calc(100vh-12rem)]">
-      {/* Header */}
-      <div className="border-b border-gray-200 px-6 py-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-lg font-semibold text-gray-900">Chat</h2>
-            {uploadedFile && (
-              <p className="text-sm text-gray-500">
+    <div className="bg-white flex flex-col h-full">
+      {/* Header - Only show if file is uploaded */}
+      {uploadedFile && (
+        <div className="border-b border-gray-100 px-6 py-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-gray-600">
                 Analyzing: {uploadedFile.filename}
               </p>
+            </div>
+
+            {messages.length > 0 && (
+              <button
+                onClick={clearChat}
+                className="text-sm text-gray-500 hover:text-gray-700 transition-colors"
+              >
+                Clear Chat
+              </button>
             )}
           </div>
-
-          {messages.length > 0 && (
-            <button
-              onClick={clearChat}
-              className="text-sm text-gray-500 hover:text-gray-700 transition-colors"
-            >
-              Clear Chat
-            </button>
-          )}
         </div>
-      </div>
+      )}
 
       {/* Messages Area */}
       <div className="flex-1 overflow-y-auto px-6 py-4">
         {messages.length === 0 ? (
           <div className="h-full flex items-center justify-center">
-            <div className="text-center text-gray-500">
-              <svg
-                className="mx-auto h-12 w-12 text-gray-400 mb-4"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
-                />
-              </svg>
-              <p className="text-lg font-medium mb-2">No messages yet</p>
-              <p className="text-sm">
+            <div className="text-center">
+              <h2 className="text-3xl font-medium text-gray-900 mb-2" style={{ letterSpacing: '-0.7px' }}>
+                Analyze Excel files using AI-powered tools
+              </h2>
+              <p className="text-base text-gray-500" style={{ letterSpacing: '-0.7px' }}>
                 {uploadedFile
-                  ? 'Start a conversation about your Excel file'
-                  : 'Upload an Excel file to get started'}
+                  ? 'Start asking questions about your data'
+                  : 'Upload Excel files (.xlsx, .xls, .xlsm) up to 50MB'}
               </p>
             </div>
           </div>
@@ -309,62 +334,86 @@ function ChatInterface({ uploadedFile, apiBaseUrl, onClearChat }) {
         )}
       </div>
 
-      {/* Input Area */}
-      <div className="border-t border-gray-200 px-6 py-4">
-        <form onSubmit={handleSendMessage} className="flex space-x-4">
-          <textarea
-            value={inputMessage}
-            onChange={(e) => setInputMessage(e.target.value)}
-            onKeyPress={handleKeyPress}
-            placeholder={
-              uploadedFile
-                ? 'Ask a question about your Excel file...'
-                : 'Upload a file first...'
-            }
-            disabled={!uploadedFile || sending}
-            className="flex-1 resize-none rounded-lg border border-gray-300 px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100 disabled:cursor-not-allowed"
-            rows="2"
+      {/* Input Area - AI Elements PromptInput */}
+      <TooltipProvider delayDuration={300}>
+        <div className="px-6 py-4">
+          {/* Hidden file input */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".xlsx,.xls,.xlsm"
+            onChange={handleFileChange}
+            className="hidden"
           />
 
-          <button
-            type="submit"
-            disabled={!uploadedFile || !inputMessage.trim() || sending}
-            className={`px-6 py-2 rounded-lg font-medium transition-colors ${
-              uploadedFile && inputMessage.trim() && !sending
-                ? 'bg-blue-600 text-white hover:bg-blue-700'
-                : 'bg-gray-300 text-gray-500 cursor-not-allowed'
-            }`}
-          >
-            {sending ? (
-              <svg
-                className="animate-spin h-5 w-5"
-                fill="none"
-                viewBox="0 0 24 24"
+          {/* File indicator */}
+          {uploadedFile && (
+            <div className="mb-3 flex items-center gap-2 p-2 bg-gray-50 border border-gray-200 rounded-md">
+              <PaperclipIcon className="h-4 w-4 text-gray-600" />
+              <span className="flex-1 text-sm text-gray-700 truncate">
+                {uploadedFile.filename}
+              </span>
+              <button
+                onClick={handleRemoveFile}
+                className="text-gray-400 hover:text-gray-600 transition-colors"
+                aria-label="Remove file"
               >
-                <circle
-                  className="opacity-25"
-                  cx="12"
-                  cy="12"
-                  r="10"
-                  stroke="currentColor"
-                  strokeWidth="4"
-                />
-                <path
-                  className="opacity-75"
-                  fill="currentColor"
-                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                />
-              </svg>
-            ) : (
-              'Send'
-            )}
-          </button>
-        </form>
+                <XIcon className="h-4 w-4" />
+              </button>
+            </div>
+          )}
 
-        <p className="text-xs text-gray-500 mt-2">
-          Press Enter to send, Shift+Enter for new line
-        </p>
-      </div>
+          {/* Upload error indicator */}
+          {uploadError && (
+            <div className="mb-3 p-3 bg-red-50 border border-red-100 rounded-md">
+              <p className="text-sm text-red-700">{uploadError}</p>
+            </div>
+          )}
+
+          <PromptInput 
+            onSubmit={async ({ text }) => {
+              if (text.trim() && uploadedFile) {
+                await handleSendMessage(text)
+              }
+            }}
+            className="rounded-3xl"
+          >
+            <PromptInputBody>
+              <PromptInputTextarea
+                placeholder="Ask any deep analytical questions"
+                disabled={!uploadedFile || sending}
+                className="text-gray-600 placeholder:text-[#4B4B4B]"
+              />
+            </PromptInputBody>
+            <PromptInputFooter>
+              <PromptInputTools>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <PromptInputButton
+                      onClick={handleAttachmentClick}
+                      disabled={uploading}
+                      aria-label="Upload Excel file"
+                      className="text-gray-600 hover:text-gray-900"
+                    >
+                      <PaperclipIcon className="h-4 w-4" />
+                    </PromptInputButton>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" align="center">
+                    <p>Excel files (.xlsx, .xls, .xlsm) up to 50MB</p>
+                  </TooltipContent>
+                </Tooltip>
+              </PromptInputTools>
+              <PromptInputSubmit 
+                status={sending ? 'submitted' : undefined}
+                disabled={!uploadedFile || sending}
+                className="bg-[#7c2d3a] hover:bg-[#641f2d] text-white rounded-full"
+              >
+                {!sending && <ArrowUp className="h-4 w-4" />}
+              </PromptInputSubmit>
+            </PromptInputFooter>
+          </PromptInput>
+        </div>
+      </TooltipProvider>
     </div>
   )
 }
