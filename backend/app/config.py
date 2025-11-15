@@ -47,6 +47,11 @@ class Settings(BaseSettings):
     ANALYTICS_BATCH_SIZE: int = 100
     ANALYTICS_RETENTION_DAYS: int = 90
 
+    # Metabase Proxy Settings
+    METABASE_ENABLED: bool = True
+    METABASE_URL: str = "http://metabase:3000"
+    METABASE_TIMEOUT: int = 60
+
     class Config:
         env_file = ".env"
         case_sensitive = True

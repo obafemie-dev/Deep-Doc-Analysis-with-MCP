@@ -67,7 +67,25 @@ export const useAnalytics = () => {
         throw new Error('Failed to submit feedback');
       }
 
-      return await response.json();
+      // Handle empty or malformed JSON responses gracefully
+      const contentType = response.headers.get('content-type');
+      if (!contentType || !contentType.includes('application/json')) {
+        console.warn('Feedback response is not JSON, assuming success');
+        return { status: 'success' };
+      }
+
+      const text = await response.text();
+      if (!text || text.trim().length === 0) {
+        console.warn('Feedback response body is empty, assuming success');
+        return { status: 'success' };
+      }
+
+      try {
+        return JSON.parse(text);
+      } catch (parseError) {
+        console.error('Failed to parse feedback response:', parseError);
+        return { status: 'success' };
+      }
     } catch (error) {
       console.error('Failed to submit feedback:', error);
       throw error;

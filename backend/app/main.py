@@ -24,6 +24,7 @@ from .claude_service import claude_service
 from .database import init_analytics_db
 from .middleware.analytics_middleware import AnalyticsMiddleware
 from .routers import analytics
+from .routers import metabase_proxy
 # Import models to register them with SQLAlchemy Base.metadata before init_analytics_db
 from .models import analytics as analytics_models  # noqa: F401
 
@@ -58,6 +59,11 @@ if settings.ANALYTICS_ENABLED:
 # Include analytics router
 app.include_router(analytics.router)
 
+# Include Metabase proxy router (if enabled)
+if settings.METABASE_ENABLED:
+    app.include_router(metabase_proxy.router)
+    logger.info("Metabase proxy enabled at /metabase")
+
 # Ensure upload directory exists
 UPLOAD_DIR = Path(settings.UPLOAD_DIR)
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -87,6 +93,12 @@ async def startup_event():
 async def shutdown_event():
     """Cleanup on application shutdown"""
     logger.info("Shutting down application...")
+
+    # Cleanup Metabase proxy httpx client
+    if settings.METABASE_ENABLED:
+        from .routers.metabase_proxy import shutdown_httpx_client
+        await shutdown_httpx_client()
+        logger.info("Metabase proxy client closed")
 
 
 # ============================================================================
