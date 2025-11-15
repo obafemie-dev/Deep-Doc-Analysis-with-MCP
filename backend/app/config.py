@@ -53,7 +53,7 @@ class Settings(BaseSettings):
     METABASE_TIMEOUT: int = 60
 
     class Config:
-        env_file = ".env"
+        env_file = "../../.env"
         case_sensitive = True
 
 
