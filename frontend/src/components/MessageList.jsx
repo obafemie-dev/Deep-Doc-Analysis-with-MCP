@@ -32,7 +32,7 @@ function MessageList({ messages }) {
           <div
             className={`max-w-[80%] rounded-lg px-4 py-3 ${
               message.role === 'user'
-                ? 'bg-blue-600 text-white'
+                ? 'bg-[#5219281A] text-[#521928]'
                 : message.isError
                 ? 'bg-red-50 border border-red-200 text-red-800'
                 : 'bg-gray-100 text-gray-900'
