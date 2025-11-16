@@ -62,6 +62,12 @@ class Settings(BaseSettings):
     METABASE_URL: str = "http://metabase:3000"
     METABASE_TIMEOUT: int = 60
 
+    # Stytch Authentication Settings
+    STYTCH_PROJECT_ID: Optional[str] = None
+    STYTCH_SECRET: Optional[str] = None
+    STYTCH_ENV: str = "test"  # "test" or "live"
+    FRONTEND_URL: str = "http://localhost:3000"
+
     class Config:
         env_file = "../../.env"
         case_sensitive = True

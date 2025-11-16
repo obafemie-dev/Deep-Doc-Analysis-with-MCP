@@ -25,8 +25,10 @@ from .database import init_analytics_db
 from .middleware.analytics_middleware import AnalyticsMiddleware
 from .routers import analytics
 from .routers import metabase_proxy
+from .routers import auth
 # Import models to register them with SQLAlchemy Base.metadata before init_analytics_db
 from .models import analytics as analytics_models  # noqa: F401
+from .models import user  # noqa: F401
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -63,6 +65,10 @@ app.include_router(analytics.router)
 if settings.METABASE_ENABLED:
     app.include_router(metabase_proxy.router)
     logger.info("Metabase proxy enabled at /metabase")
+
+# Include auth router
+app.include_router(auth.router, prefix=settings.API_V1_STR)
+logger.info("Authentication endpoints enabled at /api/v1/auth")
 
 # Ensure upload directory exists
 UPLOAD_DIR = Path(settings.UPLOAD_DIR)
@@ -293,7 +299,8 @@ async def chat(request: ChatRequest):
             message=request.message,
             conversation_history=request.conversation_history,
             file_path=request.file_path,
-            stream=False
+            stream=False,
+            session_id=request.session_id  # Pass session_id for analytics tracking
         )
 
         # Collect the response from the async generator
@@ -344,7 +351,8 @@ async def chat_stream(request: ChatRequest):
                     message=request.message,
                     conversation_history=request.conversation_history,
                     file_path=request.file_path,
-                    stream=True
+                    stream=True,
+                    session_id=request.session_id  # Pass session_id for analytics tracking
                 )
 
                 # Stream each chunk as SSE

@@ -7,13 +7,21 @@ import logging
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
-from typing import Callable
+from typing import Callable, Optional
+from stytch import Client as StytchClient
 
 from ..config import settings
 from ..database import AsyncSessionLocal
 from ..services.analytics_service import AnalyticsService
 
 logger = logging.getLogger(__name__)
+
+# Initialize Stytch client for user ID extraction
+stytch_client = StytchClient(
+    project_id=settings.STYTCH_PROJECT_ID,
+    secret=settings.STYTCH_SECRET,
+    environment=settings.STYTCH_ENV
+)
 
 
 class AnalyticsMiddleware(BaseHTTPMiddleware):
@@ -24,6 +32,7 @@ class AnalyticsMiddleware(BaseHTTPMiddleware):
     - Non-blocking async event logging
     - Performance metrics (request duration)
     - Session tracking via X-Session-ID header
+    - User tracking via Stytch session cookie
     - Excludes health check and static endpoints
     """
 
@@ -57,6 +66,18 @@ class AnalyticsMiddleware(BaseHTTPMiddleware):
         # Extract session ID from headers
         session_id = request.headers.get("X-Session-ID")
 
+        # Extract user_id from Stytch session cookie
+        user_id: Optional[str] = None
+        stytch_session = request.cookies.get("stytch_session")
+        if stytch_session:
+            try:
+                # Validate session and extract user_id (non-blocking validation)
+                stytch_resp = stytch_client.sessions.authenticate(session_token=stytch_session)
+                user_id = stytch_resp.user.user_id
+            except Exception:
+                # Session invalid or expired, continue without user_id
+                pass
+
         # Track request start time
         start_time = time.time()
 
@@ -73,6 +94,7 @@ class AnalyticsMiddleware(BaseHTTPMiddleware):
                     path=str(request.url.path),
                     method=request.method,
                     session_id=session_id,
+                    user_id=user_id,
                     status_code=response.status_code,
                     duration_ms=duration_ms
                 )
@@ -98,6 +120,7 @@ class AnalyticsMiddleware(BaseHTTPMiddleware):
         path: str,
         method: str,
         session_id: str,
+        user_id: Optional[str],
         status_code: int,
         duration_ms: int
     ):
@@ -105,6 +128,7 @@ class AnalyticsMiddleware(BaseHTTPMiddleware):
         Log API request to analytics database (async, non-blocking).
 
         This runs in the background and won't affect response time.
+        Includes user_id for user-specific analytics.
         """
         try:
             async with AsyncSessionLocal() as db:
@@ -113,6 +137,7 @@ class AnalyticsMiddleware(BaseHTTPMiddleware):
                 await analytics.log_event(
                     event_type="api_request",
                     session_id=session_id,
+                    user_id=user_id,
                     data={
                         "endpoint": path,
                         "method": method,

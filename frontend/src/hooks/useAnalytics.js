@@ -6,6 +6,7 @@
  */
 import { useCallback } from 'react';
 import { useSession } from '../contexts/SessionContext';
+import { API_ENDPOINTS } from '../config/api';
 
 export const useAnalytics = () => {
   const { sessionId } = useSession();
@@ -16,10 +17,11 @@ export const useAnalytics = () => {
    * @param {string} eventType - Type of event (query, response, upload, etc.)
    * @param {object} data - Event-specific data
    * @param {object} metadata - Performance metrics, context
+   * @returns {Promise<number|null>} - Event ID from backend, or null on error
    */
   const trackEvent = useCallback(async (eventType, data = {}, metadata = {}) => {
     try {
-      await fetch('/api/v1/analytics/event', {
+      const response = await fetch(API_ENDPOINTS.ANALYTICS_EVENT, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -32,9 +34,17 @@ export const useAnalytics = () => {
           metadata
         })
       });
+
+      if (!response.ok) {
+        throw new Error('Analytics tracking failed');
+      }
+
+      const result = await response.json();
+      return result.event_id || null; // Return event_id for linking
     } catch (error) {
       // Fail silently - don't disrupt user experience
       console.error('Analytics tracking failed:', error);
+      return null;
     }
   }, [sessionId]);
 
@@ -48,7 +58,7 @@ export const useAnalytics = () => {
    */
   const submitFeedback = useCallback(async (messageId, rating, comment = null, queryEventId = null) => {
     try {
-      const response = await fetch('/api/v1/analytics/feedback', {
+      const response = await fetch(API_ENDPOINTS.ANALYTICS_FEEDBACK, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -116,13 +126,15 @@ export const useAnalytics = () => {
    * @param {string} queryText - The user's question
    * @param {string} filePath - Path to the Excel file (if any)
    * @param {number} conversationTurn - Turn number in conversation
+   * @returns {Promise<number|null>} - Event ID for linking feedback, or null on error
    */
   const trackQuery = useCallback(async (queryText, filePath = null, conversationTurn = 1) => {
-    await trackEvent('query', {
+    const eventId = await trackEvent('query', {
       query_text: queryText,
       file_path: filePath,
       conversation_turn: conversationTurn
     });
+    return eventId; // Return event_id for linking to feedback
   }, [trackEvent]);
 
   /**

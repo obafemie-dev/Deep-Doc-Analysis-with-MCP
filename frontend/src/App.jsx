@@ -3,6 +3,9 @@ import axios from 'axios'
 import ChatInterface from './components/ChatInterface'
 import StatusBar from './components/StatusBar'
 import { SessionProvider } from './contexts/SessionContext'
+import { useAuth } from './hooks/useAuth'
+import { useAnalytics } from './hooks/useAnalytics'
+import { API_V1, API_ENDPOINTS } from '@/config/api'
 import {
   Sidebar,
   SidebarContent,
@@ -23,10 +26,12 @@ import {
 import { LogOut } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1'
+const API_BASE_URL = API_V1
 
 function App() {
   const navigate = useNavigate()
+  const { user, isAuthenticated } = useAuth()
+  const { sessionId, trackEvent } = useAnalytics()
   const [uploadedFile, setUploadedFile] = useState(null)
   const [systemStatus, setSystemStatus] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -38,7 +43,12 @@ function App() {
 
   const checkSystemStatus = async () => {
     try {
-      const response = await axios.get(`${API_BASE_URL}/status`)
+      const response = await axios.get(`${API_BASE_URL}/status`, {
+        withCredentials: true,
+        headers: {
+          'X-Session-ID': sessionId  // Include session ID for tracking
+        }
+      })
       setSystemStatus(response.data)
     } catch (error) {
       console.error('Error checking system status:', error)
@@ -49,20 +59,45 @@ function App() {
   }
 
   const handleFileUpload = async (file) => {
+    const startTime = Date.now()
+
     try {
       const formData = new FormData()
       formData.append('file', file)
 
       const response = await axios.post(`${API_BASE_URL}/upload`, formData, {
         headers: {
-          'Content-Type': 'multipart/form-data'
+          'Content-Type': 'multipart/form-data',
+          'X-Session-ID': sessionId  // Include session ID for backend tracking
         }
       })
 
       setUploadedFile(response.data)
+
+      // Track successful file upload
+      const processingTime = Date.now() - startTime
+      await trackEvent('upload', {
+        filename: file.name,
+        file_size: file.size,
+        file_type: file.type
+      }, {
+        processing_time_ms: processingTime
+      })
+
       return response.data
     } catch (error) {
       console.error('Error uploading file:', error)
+
+      // Track failed upload
+      const processingTime = Date.now() - startTime
+      await trackEvent('upload_error', {
+        filename: file.name,
+        file_size: file.size,
+        error: error.message
+      }, {
+        processing_time_ms: processingTime
+      })
+
       throw error
     }
   }
@@ -80,9 +115,36 @@ function App() {
     )
   }
 
-  const handleLogout = () => {
-    // Clear auth token
+  const getUserInitials = () => {
+    if (user?.full_name) {
+      return user.full_name
+        .split(' ')
+        .map(n => n[0])
+        .join('')
+        .toUpperCase()
+        .slice(0, 2)
+    }
+    if (user?.email) {
+      return user.email[0].toUpperCase()
+    }
+    return 'U'
+  }
+
+  const handleLogout = async () => {
+    try {
+      // Call backend to revoke Stytch session
+      await fetch(API_ENDPOINTS.LOGOUT, {
+        method: 'POST',
+        credentials: 'include', // Send session cookie
+      })
+    } catch (error) {
+      console.error('Logout error:', error)
+      // Continue with logout even if API call fails
+    }
+
+    // Clear any localStorage remnants (fallback cleanup)
     localStorage.removeItem('auth_token')
+
     // Redirect to login
     navigate('/login')
   }
@@ -140,12 +202,16 @@ function App() {
                   <button className="flex items-center gap-3 w-full hover:bg-gray-50 rounded-lg p-2 transition-colors">
                     <Avatar className="h-8 w-8">
                       <AvatarFallback className="bg-gray-200 text-gray-700 text-sm">
-                        TA
+                        {getUserInitials()}
                       </AvatarFallback>
                     </Avatar>
                     <div className="flex flex-col items-start text-sm">
-                      <span className="font-medium text-gray-900">User</span>
-                      <span className="text-xs text-gray-500">user@example.com</span>
+                      <span className="font-medium text-gray-900">
+                        {user?.full_name || user?.email?.split('@')[0] || 'User'}
+                      </span>
+                      <span className="text-xs text-gray-500">
+                        {user?.email || 'Loading...'}
+                      </span>
                     </div>
                   </button>
                 </DropdownMenuTrigger>

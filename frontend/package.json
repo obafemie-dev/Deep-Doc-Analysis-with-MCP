@@ -22,6 +22,8 @@
     "@radix-ui/react-slot": "^1.2.4",
     "@radix-ui/react-tooltip": "^1.2.8",
     "@radix-ui/react-use-controllable-state": "^1.2.2",
+    "@stytch/react": "^19.15.2",
+    "@stytch/vanilla-js": "^5.41.1",
     "@xyflow/react": "^12.9.3",
     "ai": "^5.0.93",
     "axios": "^1.7.2",

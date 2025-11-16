@@ -26,6 +26,7 @@ class AnalyticsService:
         self,
         event_type: str,
         session_id: str,
+        user_id: Optional[str] = None,
         data: Optional[Dict[str, Any]] = None,
         metadata: Optional[Dict[str, Any]] = None
     ) -> AnalyticsEvent:
@@ -36,6 +37,7 @@ class AnalyticsService:
         Args:
             event_type: Type of event (query, response, error, etc.)
             session_id: Session UUID
+            user_id: Stytch user ID (optional, for authenticated users)
             data: Event-specific data
             metadata: Performance metrics, context
 
@@ -48,6 +50,7 @@ class AnalyticsService:
             event = AnalyticsEvent(
                 event_type=event_type,
                 session_id=session_id,
+                user_id=user_id,
                 data=data or {},
                 event_metadata=metadata or {}
             )
@@ -86,12 +89,14 @@ class AnalyticsService:
         query_text: str,
         file_path: Optional[str],
         conversation_turn: int,
-        llm_provider: str
+        llm_provider: str,
+        user_id: Optional[str] = None
     ) -> AnalyticsEvent:
         """Track a user query"""
         return await self.log_event(
             event_type="query",
             session_id=session_id,
+            user_id=user_id,
             data={
                 "query_text": query_text,
                 "file_path": file_path,
@@ -108,12 +113,14 @@ class AnalyticsService:
         tool_calls: List[Dict[str, Any]],
         duration_ms: int,
         success: bool,
-        streaming: bool = True
+        streaming: bool = True,
+        user_id: Optional[str] = None
     ) -> AnalyticsEvent:
         """Track an AI response"""
         return await self.log_event(
             event_type="response",
             session_id=session_id,
+            user_id=user_id,
             data={
                 "query_id": query_id,
                 "response_text": response_text,
@@ -136,12 +143,14 @@ class AnalyticsService:
         parameters: Dict[str, Any],
         duration_ms: int,
         success: bool,
-        error: Optional[str] = None
+        error: Optional[str] = None,
+        user_id: Optional[str] = None
     ) -> AnalyticsEvent:
         """Track individual tool execution"""
         return await self.log_event(
             event_type="tool_call",
             session_id=session_id,
+            user_id=user_id,
             data={
                 "tool_name": tool_name,
                 "parameters": parameters,
@@ -159,12 +168,14 @@ class AnalyticsService:
         filename: str,
         file_size: int,
         file_type: str,
-        processing_time_ms: int
+        processing_time_ms: int,
+        user_id: Optional[str] = None
     ) -> AnalyticsEvent:
         """Track file upload"""
         return await self.log_event(
             event_type="upload",
             session_id=session_id,
+            user_id=user_id,
             data={
                 "filename": filename,
                 "file_size": file_size,
@@ -182,18 +193,20 @@ class AnalyticsService:
     async def create_session(
         self,
         session_id: str,
+        user_id: Optional[str] = None,
         llm_provider: Optional[str] = None
     ) -> Session:
         """Create a new session"""
         session = Session(
             id=session_id,
+            user_id=user_id,
             llm_provider=llm_provider
         )
         self.db.add(session)
         await self.db.flush()
         await self.db.refresh(session)
 
-        logger.info(f"Session created: {session_id}")
+        logger.info(f"Session created: {session_id} for user: {user_id or 'anonymous'}")
         return session
 
     async def get_session(self, session_id: str) -> Optional[Session]:
@@ -284,12 +297,14 @@ class AnalyticsService:
         session_id: str,
         message_id: str,
         rating: int,
+        user_id: Optional[str] = None,
         query_event_id: Optional[int] = None,
         comment: Optional[str] = None
     ) -> QueryFeedback:
         """Submit user feedback"""
         feedback = QueryFeedback(
             session_id=session_id,
+            user_id=user_id,
             message_id=message_id,
             query_event_id=query_event_id,
             rating=rating,
@@ -299,7 +314,7 @@ class AnalyticsService:
         await self.db.flush()
         await self.db.refresh(feedback)
 
-        logger.info(f"Feedback submitted: {rating} for message {message_id}")
+        logger.info(f"Feedback submitted: {rating} for message {message_id} by user {user_id or 'anonymous'}")
         return feedback
 
     async def get_feedback_by_message(self, message_id: str) -> Optional[QueryFeedback]:
@@ -315,6 +330,7 @@ class AnalyticsService:
     async def log_error(
         self,
         session_id: Optional[str],
+        user_id: Optional[str],
         error_type: str,
         error_message: str,
         stack_trace: Optional[str] = None,
@@ -324,6 +340,7 @@ class AnalyticsService:
         """Log an error"""
         error_log = ErrorLog(
             session_id=session_id,
+            user_id=user_id,
             error_type=error_type,
             error_message=error_message,
             stack_trace=stack_trace,
@@ -334,7 +351,7 @@ class AnalyticsService:
         await self.db.flush()
         await self.db.refresh(error_log)
 
-        logger.error(f"Error logged: {error_type} - {error_message}")
+        logger.error(f"Error logged: {error_type} - {error_message} (user: {user_id or 'anonymous'})")
         return error_log
 
     # ========================================================================

@@ -13,6 +13,7 @@ class ChatRequest(BaseModel):
     message: str = Field(..., description="User message")
     file_path: Optional[str] = Field(None, description="Path to uploaded Excel file")
     conversation_history: List[ChatMessage] = Field(default_factory=list)
+    session_id: Optional[str] = Field(None, description="Analytics session ID for tracking")
 
 
 class ChatResponse(BaseModel):

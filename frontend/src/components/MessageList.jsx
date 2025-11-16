@@ -68,7 +68,7 @@ function MessageList({ messages }) {
             {message.role === 'assistant' && !message.isError && message.content && (
               <FeedbackButtons
                 messageId={String(message.id || message.timestamp || Date.now())}
-                queryEventId={null}
+                queryEventId={message.queryEventId || null}
               />
             )}
           </div>

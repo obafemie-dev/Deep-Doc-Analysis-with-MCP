@@ -309,7 +309,8 @@ class ClaudeLLMService:
         message: str,
         conversation_history: List[ChatMessage],
         file_path: Optional[str] = None,
-        stream: bool = False
+        stream: bool = False,
+        session_id: Optional[str] = None
     ) -> AsyncGenerator[str, None]:
         """
         Process chat message with Claude and MCP tools (SINGLE TURN)
@@ -342,7 +343,8 @@ class ClaudeLLMService:
             system_prompt,
             iteration=0,
             max_iterations=5,
-            stream=stream
+            stream=stream,
+            session_id=session_id
         ):
             yield chunk
 
@@ -354,7 +356,8 @@ class ClaudeLLMService:
         iteration: int = 0,
         max_iterations: int = 5,
         accumulated_tokens: int = 0,
-        stream: bool = False
+        stream: bool = False,
+        session_id: Optional[str] = None
     ) -> AsyncGenerator[str, None]:
         """
         Handle Claude response with controlled iteration loop
@@ -451,7 +454,7 @@ class ClaudeLLMService:
 
             # Execute MCP tool
             try:
-                result = await self._execute_mcp_tool(function_name, function_args)
+                result = await self._execute_mcp_tool(function_name, function_args, session_id)
 
                 # Truncate large results
                 result = self._truncate_large_result(result)
@@ -594,7 +597,8 @@ class ClaudeLLMService:
                             iteration=iteration + 1,
                             max_iterations=max_iterations,
                             accumulated_tokens=current_tokens,
-                            stream=stream  # Preserve streaming for final response
+                            stream=stream,  # Preserve streaming for final response
+                            session_id=session_id
                         ):
                             yield chunk
             else:
@@ -615,7 +619,8 @@ class ClaudeLLMService:
                     iteration=iteration + 1,  # Increment iteration
                     max_iterations=max_iterations,
                     accumulated_tokens=current_tokens,  # Pass tokens forward
-                    stream=stream  # Pass streaming flag
+                    stream=stream,  # Pass streaming flag
+                    session_id=session_id
                 ):
                     yield chunk
 
@@ -661,38 +666,121 @@ class ClaudeLLMService:
     async def _execute_mcp_tool(
         self,
         tool_name: str,
-        arguments: Dict[str, Any]
+        arguments: Dict[str, Any],
+        session_id: Optional[str] = None
     ) -> Any:
         """
-        Execute MCP tool by name
+        Execute MCP tool by name with analytics tracking
 
         Args:
             tool_name: Name of the tool to execute
             arguments: Tool arguments
+            session_id: Optional session ID for analytics tracking
 
         Returns:
             Tool execution result
         """
-        tools = mcp_server.list_tools()
+        import time
 
-        if tool_name not in tools:
-            raise ValueError(f"Tool '{tool_name}' not found")
+        logger.info(f"Executing tool: {tool_name}")
+        start_time = time.time()
 
-        tool_func = tools[tool_name]
+        try:
+            tools = mcp_server.list_tools()
 
-        # Coerce string parameters to proper types (dict/list) using shared utility
-        coerced_args = {key: coerce_string_to_type(value) for key, value in arguments.items()}
+            if tool_name not in tools:
+                raise ValueError(f"Tool '{tool_name}' not found")
 
-        # Log successful coercions
-        for key, original_value in arguments.items():
-            coerced_value = coerced_args[key]
-            if original_value != coerced_value:
-                logger.info(f"Coerced parameter '{key}' from string to {type(coerced_value).__name__}")
+            tool_func = tools[tool_name]
 
-        # Execute tool with coerced arguments
-        result = tool_func(**coerced_args)
+            # Coerce string parameters to proper types (dict/list) using shared utility
+            coerced_args = {key: coerce_string_to_type(value) for key, value in arguments.items()}
 
-        return result
+            # Log successful coercions
+            for key, original_value in arguments.items():
+                coerced_value = coerced_args[key]
+                if original_value != coerced_value:
+                    logger.info(f"Coerced parameter '{key}' from string to {type(coerced_value).__name__}")
+
+            # Execute tool with coerced arguments
+            result = tool_func(**coerced_args)
+
+            duration_ms = int((time.time() - start_time) * 1000)
+
+            # Track successful tool execution
+            if session_id:
+                await self._track_tool_call(
+                    session_id=session_id,
+                    tool_name=tool_name,
+                    parameters=arguments,
+                    duration_ms=duration_ms,
+                    success=True
+                )
+
+            logger.info(f"Tool '{tool_name}' executed successfully in {duration_ms}ms")
+            return result
+
+        except Exception as e:
+            duration_ms = int((time.time() - start_time) * 1000)
+
+            # Track failed tool execution
+            if session_id:
+                await self._track_tool_call(
+                    session_id=session_id,
+                    tool_name=tool_name,
+                    parameters=arguments,
+                    duration_ms=duration_ms,
+                    success=False,
+                    error=str(e)
+                )
+
+            logger.error(f"Tool '{tool_name}' failed after {duration_ms}ms: {e}")
+            raise
+
+    async def _track_tool_call(
+        self,
+        session_id: str,
+        tool_name: str,
+        parameters: Dict[str, Any],
+        duration_ms: int,
+        success: bool,
+        error: Optional[str] = None
+    ):
+        """
+        Track MCP tool execution to analytics database.
+
+        This runs asynchronously and won't affect tool execution performance.
+        If tracking fails, it logs the error but doesn't raise exceptions.
+
+        Args:
+            session_id: Analytics session ID
+            tool_name: Name of the executed tool
+            parameters: Input parameters passed to the tool
+            duration_ms: Execution duration in milliseconds
+            success: Whether execution succeeded
+            error: Error message if failed
+        """
+        try:
+            from .database import AsyncSessionLocal
+            from .services.analytics_service import AnalyticsService
+
+            async with AsyncSessionLocal() as db:
+                analytics = AnalyticsService(db)
+                await analytics.track_tool_call(
+                    session_id=session_id,
+                    tool_name=tool_name,
+                    parameters=parameters,
+                    duration_ms=duration_ms,
+                    success=success,
+                    error=error
+                )
+                await db.commit()
+
+            logger.debug(f"Tool call tracked: {tool_name} ({duration_ms}ms, success={success})")
+
+        except Exception as e:
+            # Don't let analytics failures affect tool execution
+            logger.error(f"Failed to track tool call '{tool_name}': {e}")
 
 
 # Singleton instance

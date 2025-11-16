@@ -126,7 +126,8 @@ function ChatInterface({ uploadedFile, apiBaseUrl, onClearChat, onFileUpload }) 
     setMessages(prev => [...prev, userMessage])
     setSending(true)
 
-    trackQuery(userInputMessage, uploadedFile?.file_path, messages.length / 2 + 1)
+    // Capture event_id for linking feedback to this query
+    const queryEventId = await trackQuery(userInputMessage, uploadedFile?.file_path, messages.length / 2 + 1)
 
     const assistantMessageId = userMessageId + 1
     const startTime = Date.now()
@@ -135,7 +136,8 @@ function ChatInterface({ uploadedFile, apiBaseUrl, onClearChat, onFileUpload }) 
       content: '',
       thinking_steps: [],
       timestamp: new Date().toISOString(),
-      id: assistantMessageId
+      id: assistantMessageId,
+      queryEventId: queryEventId  // Attach event_id for feedback linking
     }
     setMessages(prev => [...prev, assistantMessage])
 
@@ -153,7 +155,8 @@ function ChatInterface({ uploadedFile, apiBaseUrl, onClearChat, onFileUpload }) 
         body: JSON.stringify({
           message: userInputMessage,
           file_path: uploadedFile.file_path,
-          conversation_history: messages
+          conversation_history: messages,
+          session_id: sessionId
         })
       })
 
