@@ -12,20 +12,30 @@ class Settings(BaseSettings):
     BACKEND_CORS_ORIGINS: Union[str, list[str]] = "http://localhost:3000,http://localhost:5173"
 
     @model_validator(mode='after')
-    def parse_cors_origins(self):
-        """Parse comma-separated CORS origins into a list"""
+    def parse_comma_separated_values(self):
+        """Parse comma-separated values into lists/sets"""
+        # Parse CORS origins
         if isinstance(self.BACKEND_CORS_ORIGINS, str):
             self.BACKEND_CORS_ORIGINS = [
                 origin.strip()
                 for origin in self.BACKEND_CORS_ORIGINS.split(',')
                 if origin.strip()
             ]
+
+        # Parse allowed extensions
+        if isinstance(self.ALLOWED_EXTENSIONS, str):
+            self.ALLOWED_EXTENSIONS = {
+                ext.strip()
+                for ext in self.ALLOWED_EXTENSIONS.split(',')
+                if ext.strip()
+            }
+
         return self
 
     # File Upload
     UPLOAD_DIR: str = "./uploads"
     MAX_FILE_SIZE: int = 50 * 1024 * 1024  # 50MB
-    ALLOWED_EXTENSIONS: set[str] = {".xlsx", ".xls", ".xlsm"}
+    ALLOWED_EXTENSIONS: Union[str, set[str]] = {".xlsx", ".xls", ".xlsm"}
 
     # LLM Provider Settings
     LLM_PROVIDER: str = "claude"  # "claude" or "ollama"
