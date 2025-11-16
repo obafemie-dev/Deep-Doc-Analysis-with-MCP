@@ -1,10 +1,11 @@
 """
 Analytics API endpoints
 """
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Cookie
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
 import logging
+import asyncio
 
 from ..database import get_analytics_db
 from ..services.analytics_service import AnalyticsService
@@ -14,10 +15,13 @@ from ..schemas.analytics import (
     FeedbackRequest,
     FeedbackResponse,
     SessionStartRequest,
+    SessionEndRequest,
     SessionUpdateRequest,
     AnalyticsSummary
 )
 from ..config import settings
+from ..routers.auth import get_current_user
+from ..models.user import User
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +37,30 @@ def get_analytics_service(db: AsyncSession = Depends(get_analytics_db)) -> Analy
     return AnalyticsService(db)
 
 
+async def get_current_user_optional(
+    stytch_session: Optional[str] = Cookie(None),
+    db: AsyncSession = Depends(get_analytics_db)
+) -> Optional[User]:
+    """
+    Optional authentication dependency for analytics.
+
+    Returns User if authenticated, None if anonymous.
+    Allows analytics tracking for both authenticated and anonymous users.
+    """
+    if not stytch_session:
+        return None
+
+    try:
+        # Reuse the auth logic but catch exceptions
+        return await get_current_user(stytch_session=stytch_session, db=db)
+    except HTTPException:
+        # Session invalid or expired, treat as anonymous
+        return None
+    except Exception as e:
+        logger.warning(f"Error validating session for analytics: {e}")
+        return None
+
+
 # ============================================================================
 # Event Tracking Endpoints
 # ============================================================================
@@ -40,34 +68,74 @@ def get_analytics_service(db: AsyncSession = Depends(get_analytics_db)) -> Analy
 @router.post("/event", response_model=EventResponse, status_code=status.HTTP_201_CREATED)
 async def track_event(
     event: EventRequest,
-    analytics: AnalyticsService = Depends(get_analytics_service)
+    analytics: AnalyticsService = Depends(get_analytics_service),
+    current_user: Optional[User] = Depends(get_current_user_optional)
 ):
     """
     Track a custom analytics event from frontend.
 
+    Two-tier async logging for optimal performance:
+    - Synchronous: query, response (need event_id immediately for linking)
+    - Asynchronous: upload, session_start, clear_chat, etc. (fire-and-forget)
+
     Events can be:
-    - query: User asks a question
-    - response: AI generates a response
-    - upload: File uploaded
-    - tool_call: MCP tool executed
-    - session_start: Session begins
-    - session_end: Session ends
-    - clear_chat: User clears conversation
-    - custom: Any other event
+    - query: User asks a question (SYNC - returns event_id)
+    - response: AI generates a response (SYNC - returns event_id)
+    - upload: File uploaded (ASYNC - better performance)
+    - tool_call: MCP tool executed (ASYNC)
+    - session_start: Session begins (ASYNC)
+    - session_end: Session ends (ASYNC)
+    - clear_chat: User clears conversation (ASYNC)
+    - custom: Any other event (ASYNC)
+
+    Automatically includes user_id if user is authenticated.
     """
     try:
-        created_event = await analytics.log_event(
-            event_type=event.event_type,
-            session_id=event.session_id,
-            data=event.data,
-            metadata=event.metadata
-        )
+        # Extract user_id from authenticated user (None if anonymous)
+        user_id = current_user.stytch_user_id if current_user else None
 
-        return EventResponse(
-            status="success",
-            event_id=created_event.id,
-            message=f"Event '{event.event_type}' tracked successfully"
-        )
+        # Critical events that need event_id immediately (synchronous)
+        SYNC_EVENTS = {'query', 'response'}
+
+        if event.event_type in SYNC_EVENTS:
+            # Synchronous logging - wait for completion and return event_id
+            created_event = await analytics.log_event(
+                event_type=event.event_type,
+                session_id=event.session_id,
+                user_id=user_id,
+                data=event.data,
+                metadata=event.metadata
+            )
+
+            return EventResponse(
+                status="success",
+                event_id=created_event.id,
+                message=f"Event '{event.event_type}' tracked successfully"
+            )
+        else:
+            # Asynchronous logging - fire and forget for better performance
+            async def log_in_background():
+                """Background task for non-critical event logging"""
+                try:
+                    await analytics.log_event(
+                        event_type=event.event_type,
+                        session_id=event.session_id,
+                        user_id=user_id,
+                        data=event.data,
+                        metadata=event.metadata
+                    )
+                except Exception as e:
+                    logger.error(f"Background event logging failed: {e}")
+
+            # Create background task (non-blocking)
+            asyncio.create_task(log_in_background())
+
+            # Return immediately without waiting for DB write
+            return EventResponse(
+                status="success",
+                event_id=None,  # No event_id for async events
+                message=f"Event '{event.event_type}' queued for tracking"
+            )
 
     except Exception as e:
         logger.error(f"Failed to track event: {e}")
@@ -84,7 +152,8 @@ async def track_event(
 @router.post("/feedback", response_model=FeedbackResponse, status_code=status.HTTP_201_CREATED)
 async def submit_feedback(
     feedback: FeedbackRequest,
-    analytics: AnalyticsService = Depends(get_analytics_service)
+    analytics: AnalyticsService = Depends(get_analytics_service),
+    current_user: Optional[User] = Depends(get_current_user_optional)
 ):
     """
     Submit user feedback on an AI response.
@@ -94,12 +163,17 @@ async def submit_feedback(
     - -1: Thumbs down (not helpful)
 
     Optional comment provides more context.
+    Automatically includes user_id if user is authenticated.
     """
     try:
+        # Extract user_id from authenticated user (None if anonymous)
+        user_id = current_user.stytch_user_id if current_user else None
+
         created_feedback = await analytics.submit_feedback(
             session_id=feedback.session_id,
             message_id=feedback.message_id,
             rating=feedback.rating,
+            user_id=user_id,  # Pass user_id for user-specific feedback tracking
             query_event_id=feedback.query_event_id,
             comment=feedback.comment
         )
@@ -125,14 +199,19 @@ async def submit_feedback(
 @router.post("/session/start", status_code=status.HTTP_201_CREATED)
 async def start_session(
     session_request: SessionStartRequest,
-    analytics: AnalyticsService = Depends(get_analytics_service)
+    analytics: AnalyticsService = Depends(get_analytics_service),
+    current_user: Optional[User] = Depends(get_current_user_optional)
 ):
     """
     Start a new analytics session.
 
     Should be called when user first loads the application.
+    Automatically includes user_id if user is authenticated.
     """
     try:
+        # Extract user_id from authenticated user (None if anonymous)
+        user_id = current_user.stytch_user_id if current_user else None
+
         # Check if session already exists
         existing_session = await analytics.get_session(session_request.session_id)
 
@@ -143,16 +222,18 @@ async def start_session(
                 "message": "Session already exists"
             }
 
-        # Create new session
+        # Create new session with user_id
         await analytics.create_session(
             session_id=session_request.session_id,
+            user_id=user_id,  # Track which user owns this session
             llm_provider=session_request.llm_provider
         )
 
-        # Log session start event
+        # Log session start event with user_id
         await analytics.log_event(
             event_type="session_start",
             session_id=session_request.session_id,
+            user_id=user_id,  # Include user_id in event
             data={
                 "llm_provider": session_request.llm_provider
             }
@@ -174,21 +255,53 @@ async def start_session(
 
 @router.post("/session/end")
 async def end_session(
-    session_id: str,
-    analytics: AnalyticsService = Depends(get_analytics_service)
+    session_end: SessionEndRequest,
+    analytics: AnalyticsService = Depends(get_analytics_service),
+    current_user: Optional[User] = Depends(get_current_user_optional)
 ):
     """
     End an analytics session.
 
     Should be called when user closes the application.
+    Automatically includes user_id if user is authenticated.
+    Only session owner can end their session.
     """
     try:
-        await analytics.end_session(session_id)
+        # Extract user_id from authenticated user (None if anonymous)
+        user_id = current_user.stytch_user_id if current_user else None
 
-        # Log session end event
+        # Get session to verify existence and ownership
+        session = await analytics.get_session(session_end.session_id)
+
+        if not session:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Session not found"
+            )
+
+        # Authorization: Only session owner can end their session
+        # If session has user_id, must match current user
+        if session.user_id is not None and session.user_id != user_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Not authorized to end this session"
+            )
+
+        # Check if already ended (idempotency)
+        if session.ended_at is not None:
+            return {
+                "status": "already_ended",
+                "message": "Session already ended",
+                "ended_at": session.ended_at.isoformat()
+            }
+
+        await analytics.end_session(session_end.session_id)
+
+        # Log session end event with user_id
         await analytics.log_event(
             event_type="session_end",
-            session_id=session_id,
+            session_id=session_end.session_id,
+            user_id=user_id,
             data={}
         )
 
@@ -197,8 +310,10 @@ async def end_session(
             "message": "Session ended successfully"
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Failed to end session: {e}")
+        logger.error(f"Failed to end session {session_end.session_id}: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to end session"

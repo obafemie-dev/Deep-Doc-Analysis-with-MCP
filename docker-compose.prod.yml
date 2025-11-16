@@ -1,0 +1,242 @@
+version: '3.8'
+
+# ============================================================================
+# Production Docker Compose Configuration for Hetzner Deployment
+# ============================================================================
+#
+# USAGE:
+#   docker-compose -f docker-compose.prod.yml up -d
+#   docker-compose -f docker-compose.prod.yml logs -f
+#   docker-compose -f docker-compose.prod.yml down
+#
+# IMPORTANT:
+#   - Uses .env.production for environment variables
+#   - Removes development volumes (no hot-reload)
+#   - Sets restart policy to 'always'
+#   - Configures resource limits
+#   - Optimized for Hetzner CX31 (2 vCPU, 8GB RAM)
+#
+# ============================================================================
+
+services:
+  # ============================================================================
+  # Backend FastAPI Service
+  # ============================================================================
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      args:
+        - PYTHON_VERSION=3.11
+    image: deepdoc/backend:latest
+    container_name: deep-doc-backend
+    ports:
+      - "127.0.0.1:8000:8000"  # Only expose to localhost (Nginx will proxy)
+    volumes:
+      # Production volumes - no source code mounting
+      - /opt/deepdoc/uploads:/app/uploads  # Persistent uploads directory
+      - analytics_db:/app  # Shared volume for analytics.db
+      - /opt/deepdoc/logs:/app/logs  # Application logs
+    env_file:
+      - .env.production
+    environment:
+      # Additional production overrides
+      - PRODUCTION=true
+      - DEBUG=false
+      - LOG_LEVEL=INFO
+      - UPLOAD_DIR=/app/uploads
+    restart: always  # Always restart on failure
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    # Resource limits for CX31 server
+    deploy:
+      resources:
+        limits:
+          cpus: '1.5'  # Max 1.5 CPU cores
+          memory: 4G   # Max 4GB RAM
+        reservations:
+          cpus: '0.5'
+          memory: 1G
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "5"
+    networks:
+      - deep-doc-network
+
+  # ============================================================================
+  # Frontend React + Nginx Service
+  # ============================================================================
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        # Build-time environment variables (baked into bundle)
+        - VITE_API_URL=${VITE_API_URL}
+        - VITE_STYTCH_PUBLIC_TOKEN=${VITE_STYTCH_PUBLIC_TOKEN}
+    image: deepdoc/frontend:latest
+    container_name: deep-doc-frontend
+    ports:
+      - "127.0.0.1:3000:80"  # Only expose to localhost (Nginx will proxy)
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: always
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
+    networks:
+      - deep-doc-network
+
+  # ============================================================================
+  # Metabase Analytics Dashboard
+  # ============================================================================
+  metabase:
+    image: metabase/metabase:latest
+    container_name: deep-doc-metabase
+    ports:
+      - "127.0.0.1:3001:3000"  # Only accessible via SSH tunnel
+    environment:
+      - MB_DB_TYPE=h2
+      - MB_DB_FILE=/metabase-data/metabase.db
+      - JAVA_TIMEZONE=UTC
+      - MB_JETTY_HOST=0.0.0.0
+      - MB_JETTY_PORT=3000
+    volumes:
+      - metabase_data:/metabase-data
+      - analytics_db:/analytics:ro  # Mount analytics DB as read-only
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: always
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 1G
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
+    networks:
+      - deep-doc-network
+
+  # ============================================================================
+  # Health Check Service (Optional - monitors all services)
+  # ============================================================================
+  healthcheck:
+    image: curlimages/curl:latest
+    container_name: deep-doc-healthcheck
+    command: >
+      sh -c "
+      while true; do
+        curl -f http://backend:8000/health || echo 'Backend unhealthy';
+        curl -f http://frontend:80 || echo 'Frontend unhealthy';
+        sleep 60;
+      done
+      "
+    depends_on:
+      - backend
+      - frontend
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '0.1'
+          memory: 64M
+    networks:
+      - deep-doc-network
+
+# ============================================================================
+# Volumes
+# ============================================================================
+volumes:
+  # Metabase database (H2)
+  metabase_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/deepdoc/data/metabase
+
+  # Analytics SQLite database (shared between backend and Metabase)
+  analytics_db:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/deepdoc/data/analytics
+
+# ============================================================================
+# Networks
+# ============================================================================
+networks:
+  deep-doc-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.25.0.0/16
+
+# ============================================================================
+# PRODUCTION DEPLOYMENT NOTES
+# ============================================================================
+#
+# 1. Directory Structure on Server:
+#    /opt/deepdoc/
+#    ├── uploads/           # User uploaded Excel files
+#    ├── data/
+#    │   ├── analytics/     # SQLite analytics database
+#    │   └── metabase/      # Metabase H2 database
+#    ├── logs/              # Application logs
+#    ├── backups/           # Database backups
+#    └── .env.production    # Environment variables
+#
+# 2. Create directories before first run:
+#    mkdir -p /opt/deepdoc/{uploads,data/{analytics,metabase},logs,backups}
+#    chmod 755 /opt/deepdoc/uploads
+#    chmod 750 /opt/deepdoc/data
+#    chmod 640 /opt/deepdoc/.env.production
+#
+# 3. Build and start services:
+#    docker-compose -f docker-compose.prod.yml build
+#    docker-compose -f docker-compose.prod.yml up -d
+#
+# 4. View logs:
+#    docker-compose -f docker-compose.prod.yml logs -f backend
+#    docker-compose -f docker-compose.prod.yml logs -f frontend
+#
+# 5. Stop services:
+#    docker-compose -f docker-compose.prod.yml down
+#
+# 6. Update and restart:
+#    git pull
+#    docker-compose -f docker-compose.prod.yml build
+#    docker-compose -f docker-compose.prod.yml up -d
+#
+# 7. Access Metabase (via SSH tunnel):
+#    ssh -L 3001:localhost:3001 user@your-server.com
+#    Open browser: http://localhost:3001
+#
+# ============================================================================

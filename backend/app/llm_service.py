@@ -2,11 +2,14 @@
 LLM Service - Integration with Ollama and MCP tools
 """
 import json
+import logging
 import ollama
 from typing import List, Dict, Any, Optional, AsyncGenerator
 from .config import settings
 from .schemas import ChatMessage
 from .mcp_server import mcp_server
+
+logger = logging.getLogger(__name__)
 
 
 class LLMService:
@@ -89,7 +92,8 @@ class LLMService:
         message: str,
         conversation_history: List[ChatMessage],
         file_path: Optional[str] = None,
-        stream: bool = False
+        stream: bool = False,
+        session_id: Optional[str] = None
     ) -> AsyncGenerator[str, None]:
         """
         Process chat message with LLM and MCP tools
@@ -156,13 +160,14 @@ class LLMService:
                 yield chunk
         else:
             # Handle complete response with progress updates
-            async for chunk in self._handle_response(response, messages):
+            async for chunk in self._handle_response(response, messages, session_id):
                 yield chunk
 
     async def _handle_response(
         self,
         response: Dict[str, Any],
-        messages: List[Dict[str, Any]]
+        messages: List[Dict[str, Any]],
+        session_id: Optional[str] = None
     ) -> AsyncGenerator[str, None]:
         """
         Handle LLM response including tool calls, yielding progress updates
@@ -170,6 +175,7 @@ class LLMService:
         Args:
             response: Ollama response
             messages: Current message history
+            session_id: Optional session ID for analytics tracking
 
         Yields:
             Progress updates and final assistant response
@@ -196,7 +202,7 @@ class LLMService:
 
             # Execute MCP tool
             try:
-                result = await self._execute_mcp_tool(function_name, function_args)
+                result = await self._execute_mcp_tool(function_name, function_args, session_id)
 
                 # Add tool result to messages
                 messages.append({
@@ -257,29 +263,116 @@ class LLMService:
     async def _execute_mcp_tool(
         self,
         tool_name: str,
-        arguments: Dict[str, Any]
+        arguments: Dict[str, Any],
+        session_id: Optional[str] = None
     ) -> Any:
         """
-        Execute MCP tool by name
+        Execute MCP tool by name with analytics tracking
 
         Args:
             tool_name: Name of the tool to execute
             arguments: Tool arguments
+            session_id: Optional session ID for analytics tracking
 
         Returns:
             Tool execution result
         """
-        tools = mcp_server.list_tools()
+        import time
 
-        if tool_name not in tools:
-            raise ValueError(f"Tool '{tool_name}' not found")
+        logger.info(f"Executing tool: {tool_name}")
+        start_time = time.time()
 
-        tool_func = tools[tool_name]
+        try:
+            tools = mcp_server.list_tools()
 
-        # Execute tool
-        result = tool_func(**arguments)
+            if tool_name not in tools:
+                raise ValueError(f"Tool '{tool_name}' not found")
 
-        return result
+            tool_func = tools[tool_name]
+
+            # Execute tool
+            result = tool_func(**arguments)
+
+            duration_ms = int((time.time() - start_time) * 1000)
+
+            # Track successful tool execution
+            if session_id:
+                await self._track_tool_call(
+                    session_id=session_id,
+                    tool_name=tool_name,
+                    parameters=arguments,
+                    duration_ms=duration_ms,
+                    success=True
+                )
+            else:
+                logger.warning(f"Tool call '{tool_name}' not tracked - missing session_id")
+
+            logger.info(f"Tool '{tool_name}' executed successfully in {duration_ms}ms")
+            return result
+
+        except Exception as e:
+            duration_ms = int((time.time() - start_time) * 1000)
+
+            # Track failed tool execution
+            if session_id:
+                await self._track_tool_call(
+                    session_id=session_id,
+                    tool_name=tool_name,
+                    parameters=arguments,
+                    duration_ms=duration_ms,
+                    success=False,
+                    error=str(e)
+                )
+            else:
+                logger.warning(f"Tool call '{tool_name}' failure not tracked - missing session_id")
+
+            logger.error(f"Tool '{tool_name}' failed after {duration_ms}ms: {e}")
+            raise
+
+    async def _track_tool_call(
+        self,
+        session_id: str,
+        tool_name: str,
+        parameters: Dict[str, Any],
+        duration_ms: int,
+        success: bool,
+        error: Optional[str] = None
+    ):
+        """
+        Track MCP tool execution to analytics database.
+
+        This runs asynchronously and won't affect tool execution performance.
+        If tracking fails, it logs the error but doesn't raise exceptions.
+
+        Args:
+            session_id: Analytics session ID
+            tool_name: Name of the executed tool
+            parameters: Input parameters passed to the tool
+            duration_ms: Execution duration in milliseconds
+            success: Whether execution succeeded
+            error: Error message if failed
+        """
+        try:
+            from .database import AsyncSessionLocal
+            from .services.analytics_service import AnalyticsService
+
+            async with AsyncSessionLocal() as db:
+                analytics = AnalyticsService(db)
+                await analytics.track_tool_call(
+                    session_id=session_id,
+                    tool_name=tool_name,
+                    parameters=parameters,
+                    duration_ms=duration_ms,
+                    success=success,
+                    error=error
+                )
+                await db.commit()
+
+            logger.debug(f"Tool call tracked: {tool_name} ({duration_ms}ms, success={success})")
+
+        except Exception as e:
+            # Don't let analytics failures affect tool execution
+            logger.error(f"Failed to track tool call '{tool_name}': {e}")
 
     def check_ollama_status(self) -> Dict[str, Any]:
         """

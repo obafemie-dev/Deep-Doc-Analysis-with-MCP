@@ -17,9 +17,9 @@ class EventRequest(BaseModel):
     def validate_event_type(cls, v):
         """Validate event type against allowed values"""
         allowed_types = [
-            'query', 'response', 'error', 'upload', 'tool_call',
-            'feedback', 'session_start', 'session_end', 'clear_chat',
-            'file_delete', 'custom'
+            'query', 'response', 'error', 'upload', 'upload_error',
+            'tool_call', 'feedback', 'session_start', 'session_end',
+            'clear_chat', 'file_delete', 'custom'
         ]
         if v not in allowed_types:
             raise ValueError(f'Invalid event type. Must be one of {allowed_types}')
@@ -96,6 +96,18 @@ class SessionUpdateRequest(BaseModel):
                 "message_count": 10,
                 "file_count": 2,
                 "total_query_time_ms": 45000
+            }
+        }
+
+
+class SessionEndRequest(BaseModel):
+    """Request schema for ending a session"""
+    session_id: str = Field(..., min_length=36, max_length=36, description="Session UUID to end")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "session_id": "550e8400-e29b-41d4-a716-446655440000"
             }
         }
 
