@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react'
 import axios from 'axios'
 import ChatInterface from './components/ChatInterface'
 import StatusBar from './components/StatusBar'
-import { SessionProvider } from './contexts/SessionContext'
 import { useAuth } from './hooks/useAuth'
 import { useAnalytics } from './hooks/useAnalytics'
 import { API_V1, API_ENDPOINTS } from '@/config/api'
@@ -150,9 +149,8 @@ function App() {
   }
 
   return (
-    <SessionProvider>
-      <SidebarProvider>
-        <div className="min-h-screen flex w-full bg-white">
+    <SidebarProvider>
+      <div className="min-h-screen flex w-full bg-white">
           {/* Sidebar */}
           <Sidebar>
             {/* Sidebar Header */}
@@ -236,9 +234,8 @@ function App() {
               />
             </div>
           </main>
-        </div>
-      </SidebarProvider>
-    </SessionProvider>
+      </div>
+    </SidebarProvider>
   )
 }
 

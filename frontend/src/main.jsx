@@ -1,19 +1,13 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
-import { StytchProvider } from '@stytch/react'
-import { StytchUIClient } from '@stytch/vanilla-js'
 import App from './App.jsx'
 import Login from './pages/Login.jsx'
 import Signup from './pages/Signup.jsx'
 import Authenticate from './pages/Authenticate.jsx'
 import { useAuth } from './hooks/useAuth.jsx'
+import { SessionProvider } from './contexts/SessionContext.jsx'
 import './index.css'
-
-// Initialize Stytch client
-const stytch = new StytchUIClient(
-  import.meta.env.VITE_STYTCH_PUBLIC_TOKEN
-)
 
 const ProtectedRoute = ({ children }) => {
   const { isAuthenticated, isLoading } = useAuth()
@@ -32,7 +26,7 @@ const ProtectedRoute = ({ children }) => {
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
-    <StytchProvider stytch={stytch}>
+    <SessionProvider>
       <BrowserRouter>
         <Routes>
           <Route path="/login" element={<Login />} />
@@ -48,6 +42,6 @@ ReactDOM.createRoot(document.getElementById('root')).render(
           />
         </Routes>
       </BrowserRouter>
-    </StytchProvider>
+    </SessionProvider>
   </React.StrictMode>,
 )
