@@ -11,9 +11,11 @@ RUN npm install
 # Copy source code
 COPY . .
 
-# Accept build argument for API URL
+# Accept build arguments for environment variables
 ARG VITE_API_URL=http://localhost:8000/api/v1
+ARG VITE_STYTCH_PUBLIC_TOKEN
 ENV VITE_API_URL=$VITE_API_URL
+ENV VITE_STYTCH_PUBLIC_TOKEN=$VITE_STYTCH_PUBLIC_TOKEN
 
 # Build the application
 RUN npm run build
