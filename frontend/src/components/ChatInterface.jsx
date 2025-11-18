@@ -89,8 +89,6 @@ function ChatInterface({ uploadedFile, apiBaseUrl, onClearChat, onFileUpload }) 
   }, [messages])
 
   useEffect(() => {
-    if (sending) return
-
     if (uploadedFile && uploadedFile.file_path !== welcomeShownForFile.current) {
       const welcomeMessage = {
         role: 'assistant',
@@ -101,9 +99,10 @@ function ChatInterface({ uploadedFile, apiBaseUrl, onClearChat, onFileUpload }) 
       setMessages([welcomeMessage])
       welcomeShownForFile.current = uploadedFile.file_path
     } else if (!uploadedFile) {
+      setMessages([])
       welcomeShownForFile.current = null
     }
-  }, [uploadedFile, sending])
+  }, [uploadedFile])
 
   const handleSendMessage = async (userInputMessage) => {
     if (!userInputMessage.trim()) {
@@ -131,15 +130,6 @@ function ChatInterface({ uploadedFile, apiBaseUrl, onClearChat, onFileUpload }) 
 
     const assistantMessageId = userMessageId + 1
     const startTime = Date.now()
-    const assistantMessage = {
-      role: 'assistant',
-      content: '',
-      thinking_steps: [],
-      timestamp: new Date().toISOString(),
-      id: assistantMessageId,
-      queryEventId: queryEventId  // Attach event_id for feedback linking
-    }
-    setMessages(prev => [...prev, assistantMessage])
 
     streamingContentRef.current = ''
     streamingThinkingRef.current = []
@@ -155,7 +145,7 @@ function ChatInterface({ uploadedFile, apiBaseUrl, onClearChat, onFileUpload }) 
         body: JSON.stringify({
           message: userInputMessage,
           file_path: uploadedFile.file_path,
-          conversation_history: messages,
+          conversation_history: messages.filter(msg => msg.content && msg.content.trim() !== ''),
           session_id: sessionId
         })
       })
@@ -202,15 +192,31 @@ function ChatInterface({ uploadedFile, apiBaseUrl, onClearChat, onFileUpload }) 
               if (parsed.type === 'content' && parsed.content) {
                 streamingContentRef.current += parsed.content
 
-                setMessages(prev => prev.map(msg =>
-                  msg.id === assistantMessageId
-                    ? {
-                        ...msg,
-                        content: streamingContentRef.current,
-                        thinking_steps: streamingThinkingRef.current
-                      }
-                    : msg
-                ))
+                setMessages(prev => {
+                  const existingMessage = prev.find(msg => msg.id === assistantMessageId)
+                  if (existingMessage) {
+                    // Update existing message
+                    return prev.map(msg =>
+                      msg.id === assistantMessageId
+                        ? {
+                            ...msg,
+                            content: streamingContentRef.current,
+                            thinking_steps: streamingThinkingRef.current
+                          }
+                        : msg
+                    )
+                  } else {
+                    // Create new assistant message on first content chunk
+                    return [...prev, {
+                      role: 'assistant',
+                      content: streamingContentRef.current,
+                      thinking_steps: streamingThinkingRef.current,
+                      timestamp: new Date().toISOString(),
+                      id: assistantMessageId,
+                      queryEventId: queryEventId
+                    }]
+                  }
+                })
               } else if (parsed.type && parsed.type !== 'content') {
                 streamingThinkingRef.current = [
                   ...streamingThinkingRef.current,
@@ -220,15 +226,31 @@ function ChatInterface({ uploadedFile, apiBaseUrl, onClearChat, onFileUpload }) 
                   }
                 ]
 
-                setMessages(prev => prev.map(msg =>
-                  msg.id === assistantMessageId
-                    ? {
-                        ...msg,
-                        content: streamingContentRef.current,
-                        thinking_steps: streamingThinkingRef.current
-                      }
-                    : msg
-                ))
+                setMessages(prev => {
+                  const existingMessage = prev.find(msg => msg.id === assistantMessageId)
+                  if (existingMessage) {
+                    // Update existing message
+                    return prev.map(msg =>
+                      msg.id === assistantMessageId
+                        ? {
+                            ...msg,
+                            content: streamingContentRef.current,
+                            thinking_steps: streamingThinkingRef.current
+                          }
+                        : msg
+                    )
+                  } else {
+                    // Create new assistant message if it doesn't exist yet
+                    return [...prev, {
+                      role: 'assistant',
+                      content: streamingContentRef.current,
+                      thinking_steps: streamingThinkingRef.current,
+                      timestamp: new Date().toISOString(),
+                      id: assistantMessageId,
+                      queryEventId: queryEventId
+                    }]
+                  }
+                })
               }
             } catch (err) {
               console.error('Error parsing SSE data:', err)
@@ -240,15 +262,31 @@ function ChatInterface({ uploadedFile, apiBaseUrl, onClearChat, onFileUpload }) 
     } catch (error) {
       console.error('Error sending message:', error)
 
-      setMessages(prev => prev.map(msg =>
-        msg.id === assistantMessageId
-          ? {
-              ...msg,
-              content: `Error: ${error.message || 'Failed to get response from server'}`,
-              isError: true
-            }
-          : msg
-      ))
+      setMessages(prev => {
+        const existingMessage = prev.find(msg => msg.id === assistantMessageId)
+        if (existingMessage) {
+          return prev.map(msg =>
+            msg.id === assistantMessageId
+              ? {
+                  ...msg,
+                  content: `Error: ${error.message || 'Failed to get response from server'}`,
+                  isError: true
+                }
+              : msg
+          )
+        } else {
+          // Create error message if assistant message doesn't exist
+          return [...prev, {
+            role: 'assistant',
+            content: `Error: ${error.message || 'Failed to get response from server'}`,
+            thinking_steps: [],
+            timestamp: new Date().toISOString(),
+            id: assistantMessageId,
+            queryEventId: queryEventId,
+            isError: true
+          }]
+        }
+      })
 
     } finally {
       setSending(false)
@@ -259,11 +297,27 @@ function ChatInterface({ uploadedFile, apiBaseUrl, onClearChat, onFileUpload }) 
       const streamErrors = streamingErrorsRef.current
 
       if (responseContent.length === 0 && streamErrors.length > 0) {
-        setMessages(prev => prev.map(msg =>
-          msg.id === assistantMessageId
-            ? { ...msg, content: `Error: ${streamErrors[0]}`, isError: true }
-            : msg
-        ))
+        setMessages(prev => {
+          const existingMessage = prev.find(msg => msg.id === assistantMessageId)
+          if (existingMessage) {
+            return prev.map(msg =>
+              msg.id === assistantMessageId
+                ? { ...msg, content: `Error: ${streamErrors[0]}`, isError: true }
+                : msg
+            )
+          } else {
+            // Create error message if it doesn't exist
+            return [...prev, {
+              role: 'assistant',
+              content: `Error: ${streamErrors[0]}`,
+              thinking_steps: [],
+              timestamp: new Date().toISOString(),
+              id: assistantMessageId,
+              queryEventId: queryEventId,
+              isError: true
+            }]
+          }
+        })
       }
 
       trackResponse(
