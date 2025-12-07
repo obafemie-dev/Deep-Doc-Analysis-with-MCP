@@ -26,6 +26,7 @@ from .middleware.analytics_middleware import AnalyticsMiddleware
 from .routers import analytics
 from .routers import metabase_proxy
 from .routers import auth
+from .routers import spreadsheet
 # Import models to register them with SQLAlchemy Base.metadata before init_analytics_db
 from .models import analytics as analytics_models  # noqa: F401
 from .models import user  # noqa: F401
@@ -69,6 +70,10 @@ if settings.METABASE_ENABLED:
 # Include auth router
 app.include_router(auth.router, prefix=settings.API_V1_STR)
 logger.info("Authentication endpoints enabled at /api/v1/auth")
+
+# Include spreadsheet router
+app.include_router(spreadsheet.router)
+logger.info("Spreadsheet viewer endpoints enabled at /api/v1/spreadsheet")
 
 # Ensure upload directory exists
 UPLOAD_DIR = Path(settings.UPLOAD_DIR)

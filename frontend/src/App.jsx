@@ -2,8 +2,10 @@ import { useState, useEffect } from 'react'
 import axios from 'axios'
 import ChatInterface from './components/ChatInterface'
 import StatusBar from './components/StatusBar'
+import { SpreadsheetPanel } from './components/SpreadsheetPanel'
 import { useAuth } from './hooks/useAuth'
 import { useAnalytics } from './hooks/useAnalytics'
+import { SpreadsheetProvider, useSpreadsheet } from './contexts/SpreadsheetContext'
 import { API_V1, API_ENDPOINTS } from '@/config/api'
 import {
   Sidebar,
@@ -22,19 +24,21 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { LogOut } from 'lucide-react'
+import { LogOut, PanelLeftClose, PanelLeft } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 
 const API_BASE_URL = API_V1
 
-function App() {
+function AppContent() {
   const navigate = useNavigate()
   const { user, isAuthenticated } = useAuth()
   const { sessionId, trackEvent } = useAnalytics()
+  const { loadSheets, handleSheetUpdate, clearSpreadsheet } = useSpreadsheet()
   const [uploadedFile, setUploadedFile] = useState(null)
   const [systemStatus, setSystemStatus] = useState(null)
   const [loading, setLoading] = useState(true)
   const [uploadKey, setUploadKey] = useState(0)
+  const [showSpreadsheet, setShowSpreadsheet] = useState(true)
 
   useEffect(() => {
     checkSystemStatus()
@@ -73,6 +77,11 @@ function App() {
 
       setUploadedFile(response.data)
 
+      // Load sheets for the spreadsheet viewer
+      if (response.data.filename) {
+        loadSheets(response.data.filename)
+      }
+
       // Track successful file upload
       const processingTime = Date.now() - startTime
       await trackEvent('upload', {
@@ -104,6 +113,11 @@ function App() {
   const handleClearChat = () => {
     setUploadedFile(null)
     setUploadKey(prev => prev + 1)
+    clearSpreadsheet()
+  }
+
+  const handleSheetUpdated = (updateInfo) => {
+    handleSheetUpdate(updateInfo)
   }
 
   if (loading) {
@@ -223,19 +237,60 @@ function App() {
             </SidebarFooter>
           </Sidebar>
 
-          {/* Main Content */}
-          <main className="flex-1 overflow-hidden">
-            <div className="h-full p-6">
-              <ChatInterface
-                uploadedFile={uploadedFile}
-                apiBaseUrl={API_BASE_URL}
-                onClearChat={handleClearChat}
-                onFileUpload={handleFileUpload}
-              />
+          {/* Main Content - Split View */}
+          <main className="flex-1 flex overflow-hidden">
+            {/* Chat Panel */}
+            <div className={`flex flex-col transition-all duration-300 ${showSpreadsheet && uploadedFile ? 'w-1/2' : 'flex-1'}`}>
+              {/* Toggle button header */}
+              {uploadedFile && (
+                <div className="flex items-center justify-end px-4 py-2 border-b border-gray-100">
+                  <button
+                    onClick={() => setShowSpreadsheet(!showSpreadsheet)}
+                    className="flex items-center gap-2 px-3 py-1.5 text-sm text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors"
+                    title={showSpreadsheet ? 'Hide spreadsheet' : 'Show spreadsheet'}
+                  >
+                    {showSpreadsheet ? (
+                      <>
+                        <PanelLeftClose className="h-4 w-4" />
+                        <span>Hide Spreadsheet</span>
+                      </>
+                    ) : (
+                      <>
+                        <PanelLeft className="h-4 w-4" />
+                        <span>Show Spreadsheet</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              )}
+              <div className="flex-1 p-6 overflow-hidden">
+                <ChatInterface
+                  uploadedFile={uploadedFile}
+                  apiBaseUrl={API_BASE_URL}
+                  onClearChat={handleClearChat}
+                  onFileUpload={handleFileUpload}
+                  onSheetUpdated={handleSheetUpdated}
+                />
+              </div>
             </div>
+
+            {/* Spreadsheet Panel */}
+            {showSpreadsheet && uploadedFile && (
+              <div className="w-1/2 border-l border-gray-200 p-4 overflow-hidden">
+                <SpreadsheetPanel filename={uploadedFile?.filename} />
+              </div>
+            )}
           </main>
       </div>
     </SidebarProvider>
+  )
+}
+
+function App() {
+  return (
+    <SpreadsheetProvider>
+      <AppContent />
+    </SpreadsheetProvider>
   )
 }
 

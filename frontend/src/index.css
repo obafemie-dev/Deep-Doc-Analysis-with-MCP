@@ -107,3 +107,70 @@
     letter-spacing: -0.7px;
   }
 }
+
+/* Spreadsheet Viewer Styles */
+.spreadsheet-viewer {
+  font-size: 12px;
+  --background-color: #fff;
+  --header-background-color: #f9fafb;
+  --text-color: #111827;
+  --border-color: #e5e7eb;
+}
+
+.spreadsheet-viewer table {
+  border-collapse: collapse;
+}
+
+.spreadsheet-viewer th,
+.spreadsheet-viewer td {
+  border: 1px solid var(--border-color);
+  padding: 4px 8px;
+  text-align: left;
+  min-width: 80px;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.spreadsheet-viewer th {
+  background-color: var(--header-background-color);
+  font-weight: 500;
+  color: #6b7280;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.spreadsheet-viewer tr th:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background-color: var(--header-background-color);
+}
+
+.spreadsheet-viewer td:first-child {
+  background-color: var(--header-background-color);
+  font-weight: 500;
+  color: #6b7280;
+  position: sticky;
+  left: 0;
+  z-index: 1;
+}
+
+.spreadsheet-viewer tr:hover td {
+  background-color: #f3f4f6;
+}
+
+.spreadsheet-viewer tr:hover td:first-child {
+  background-color: #e5e7eb;
+}
+
+.spreadsheet-viewer .Spreadsheet__cell--selected {
+  background-color: #dbeafe !important;
+  outline: 2px solid #3b82f6;
+}
+
+.spreadsheet-viewer .Spreadsheet__active-cell {
+  box-shadow: 0 0 0 2px #3b82f6;
+}

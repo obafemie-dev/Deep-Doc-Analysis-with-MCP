@@ -3,6 +3,7 @@ Claude LLM Service - Single-turn integration with Anthropic Claude and MCP tools
 """
 import json
 import logging
+import os
 from anthropic import Anthropic
 from typing import List, Dict, Any, Optional, AsyncGenerator
 from .config import settings
@@ -11,6 +12,26 @@ from .mcp_server import mcp_server
 from .mcp_server.utils import coerce_string_to_type
 
 logger = logging.getLogger(__name__)
+
+
+# Tools that modify the spreadsheet and should trigger viewer refresh
+SHEET_MODIFYING_TOOLS = {
+    'create_chart',
+    'create_pivot_table',
+    'create_dashboard',
+    'create_table',
+    'write_data_to_excel',
+    'apply_formula',
+    'format_range',
+    'insert_rows',
+    'insert_columns',
+    'delete_rows',
+    'delete_columns',
+    'create_worksheet',
+    'delete_worksheet',
+    'rename_worksheet',
+    'copy_worksheet'
+}
 
 
 class ClaudeLLMService:
@@ -470,6 +491,22 @@ class ClaudeLLMService:
                         "tool_name": function_name,
                         "summary": summary
                     }
+
+                    # Emit sheet_updated event for tools that modify the spreadsheet
+                    if function_name in SHEET_MODIFYING_TOOLS:
+                        # Extract filename from function args
+                        file_path = function_args.get('file_path', '')
+                        sheet_name = function_args.get('sheet_name', function_args.get('worksheet_name', ''))
+
+                        # Extract just the filename from the path
+                        filename = os.path.basename(file_path) if file_path else ''
+
+                        yield {
+                            "type": "sheet_updated",
+                            "filename": filename,
+                            "sheet_name": sheet_name,
+                            "action": function_name
+                        }
 
                 # Store for Claude follow-up (internal only)
                 tool_results.append({

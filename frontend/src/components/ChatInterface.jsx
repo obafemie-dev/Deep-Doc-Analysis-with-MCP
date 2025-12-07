@@ -15,7 +15,7 @@ import {
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { PaperclipIcon, XIcon, ArrowUp } from 'lucide-react'
 
-function ChatInterface({ uploadedFile, apiBaseUrl, onClearChat, onFileUpload }) {
+function ChatInterface({ uploadedFile, apiBaseUrl, onClearChat, onFileUpload, onSheetUpdated }) {
   const { sessionId, trackQuery, trackResponse, trackClearChat } = useAnalytics()
   const [messages, setMessages] = useState([])
   const [sending, setSending] = useState(false)
@@ -217,6 +217,9 @@ function ChatInterface({ uploadedFile, apiBaseUrl, onClearChat, onFileUpload }) 
                     }]
                   }
                 })
+              } else if (parsed.type === 'sheet_updated') {
+                // Sheet was modified by AI - notify parent to refresh spreadsheet
+                onSheetUpdated?.(parsed)
               } else if (parsed.type && parsed.type !== 'content') {
                 streamingThinkingRef.current = [
                   ...streamingThinkingRef.current,
