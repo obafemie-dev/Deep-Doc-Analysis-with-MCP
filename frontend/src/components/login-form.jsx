@@ -117,6 +117,49 @@ export function LoginForm({
             <Button type="submit" className="w-full bg-[#521928] hover:bg-[#3d1320] text-white" disabled={loading}>
               {loading ? 'Sending magic link...' : 'Send magic link'}
             </Button>
+
+            <div className="relative">
+              <div className="absolute inset-0 flex items-center">
+                <span className="w-full border-t" />
+              </div>
+              <div className="relative flex justify-center text-xs uppercase">
+                <span className="bg-background px-2 text-muted-foreground">Or</span>
+              </div>
+            </div>
+
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full"
+              onClick={async () => {
+                setLoading(true);
+                setError("");
+                try {
+                  const response = await fetch(API_ENDPOINTS.DEV_LOGIN, {
+                    method: 'POST',
+                    credentials: 'include'
+                  });
+                  
+                  if (response.ok) {
+                    // Wait a moment for cookie to be set
+                    await new Promise(resolve => setTimeout(resolve, 200));
+                    // Use replace to avoid adding to history and ensure full reload
+                    window.location.replace('/');
+                  } else {
+                    const errorData = await response.json().catch(() => ({}));
+                    setError(errorData.detail || 'Dev login failed');
+                    setLoading(false);
+                  }
+                } catch (err) {
+                  console.error('Dev login error:', err);
+                  setError('Failed to login. Please try again.');
+                  setLoading(false);
+                }
+              }}
+              disabled={loading}
+            >
+              Dev Login (Bypass)
+            </Button>
           </div>
         </div>
       </form>

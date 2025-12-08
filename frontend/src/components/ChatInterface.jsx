@@ -1,21 +1,24 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import { flushSync } from 'react-dom'
 import axios from 'axios'
 import MessageList from './MessageList'
 import { useAnalytics } from '../hooks/useAnalytics'
-import { 
+import {
   PromptInput,
   PromptInputBody,
   PromptInputTextarea,
   PromptInputFooter,
   PromptInputSubmit,
   PromptInputTools,
-  PromptInputButton
+  PromptInputButton,
+  PromptInputProvider,
+  usePromptInputController
 } from '@/components/ai-elements/prompt-input'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
-import { PaperclipIcon, XIcon, ArrowUp } from 'lucide-react'
+import { PaperclipIcon, XIcon, ArrowUp, Code, X } from 'lucide-react'
+import { useSpreadsheet } from '../contexts/SpreadsheetContext'
 
-function ChatInterface({ uploadedFile, apiBaseUrl, onClearChat, onFileUpload }) {
+function ChatInterface({ uploadedFile, apiBaseUrl, onClearChat, onFileUpload, onSheetUpdated }) {
   const { sessionId, trackQuery, trackResponse, trackClearChat } = useAnalytics()
   const [messages, setMessages] = useState([])
   const [sending, setSending] = useState(false)
@@ -27,6 +30,29 @@ function ChatInterface({ uploadedFile, apiBaseUrl, onClearChat, onFileUpload }) 
   const streamingThinkingRef = useRef([])
   const streamingErrorsRef = useRef([])
   const fileInputRef = useRef(null)
+  const { sheets, pendingCellReference, clearPendingCellReference, setAiCursor } = useSpreadsheet(); // Get sheets and cell reference from context
+  
+  // Handler for AI cursor events
+  const onAiCursor = useCallback((cursorData) => {
+    setAiCursor(cursorData);
+    // Clear cursor after a delay
+    if (cursorData) {
+      setTimeout(() => setAiCursor(null), 3000);
+    }
+  }, [setAiCursor]);
+
+    // Format suggestions for mentions
+    const suggestions = [
+        // Add sheets
+        ...(sheets || []).map(sheet => ({
+            id: sheet.name,
+            label: sheet.name,
+            value: sheet.name,
+            icon: <span className="material-symbols-rounded text-base">rubric</span>
+        })),
+    // Add special items if needed
+    { id: 'code', label: 'Code', value: 'code', icon: <Code className="w-4 h-4" /> }
+  ];
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -89,18 +115,12 @@ function ChatInterface({ uploadedFile, apiBaseUrl, onClearChat, onFileUpload }) 
   }, [messages])
 
   useEffect(() => {
-    if (uploadedFile && uploadedFile.file_path !== welcomeShownForFile.current) {
-      const welcomeMessage = {
-        role: 'assistant',
-        content: `File "${uploadedFile.filename}" uploaded successfully! I can help you analyze this Excel file. Try asking me to:\n\n- Analyze the data statistics\n- Compare columns\n- Check for data quality issues\n- Create pivot tables\n- Generate charts\n- Detect trends or anomalies\n\nWhat would you like to know?`,
-        timestamp: new Date().toISOString(),
-        id: Date.now()
-      }
-      setMessages([welcomeMessage])
-      welcomeShownForFile.current = uploadedFile.file_path
-    } else if (!uploadedFile) {
+    // Clear messages when file is removed
+    if (!uploadedFile) {
       setMessages([])
       welcomeShownForFile.current = null
+    } else {
+      welcomeShownForFile.current = uploadedFile.file_path
     }
   }, [uploadedFile])
 
@@ -114,10 +134,21 @@ function ChatInterface({ uploadedFile, apiBaseUrl, onClearChat, onFileUpload }) 
       return
     }
 
+    // Include cell reference in message if present
+    let finalMessage = userInputMessage
+    let displayMessage = userInputMessage
+    if (pendingCellReference) {
+      const cellRef = `[Referencing ${pendingCellReference.sheet}!${pendingCellReference.range}]`
+      finalMessage = `${cellRef}\n\n${userInputMessage}`
+      displayMessage = userInputMessage
+      clearPendingCellReference()
+    }
+
     const userMessageId = Date.now()
     const userMessage = {
       role: 'user',
-      content: userInputMessage,
+      content: displayMessage,
+      cellReference: pendingCellReference ? `${pendingCellReference.sheet}!${pendingCellReference.range}` : null,
       timestamp: new Date().toISOString(),
       id: userMessageId
     }
@@ -143,7 +174,7 @@ function ChatInterface({ uploadedFile, apiBaseUrl, onClearChat, onFileUpload }) 
           'X-Session-ID': sessionId,
         },
         body: JSON.stringify({
-          message: userInputMessage,
+          message: finalMessage,
           file_path: uploadedFile.file_path,
           conversation_history: messages.filter(msg => msg.content && msg.content.trim() !== ''),
           session_id: sessionId
@@ -199,10 +230,10 @@ function ChatInterface({ uploadedFile, apiBaseUrl, onClearChat, onFileUpload }) 
                     return prev.map(msg =>
                       msg.id === assistantMessageId
                         ? {
-                            ...msg,
-                            content: streamingContentRef.current,
-                            thinking_steps: streamingThinkingRef.current
-                          }
+                          ...msg,
+                          content: streamingContentRef.current,
+                          thinking_steps: streamingThinkingRef.current
+                        }
                         : msg
                     )
                   } else {
@@ -217,6 +248,11 @@ function ChatInterface({ uploadedFile, apiBaseUrl, onClearChat, onFileUpload }) 
                     }]
                   }
                 })
+              } else if (parsed.type === 'sheet_updated') {
+                onSheetUpdated?.(parsed)
+              } else if (parsed.type === 'ai_cursor') {
+                // Update AI cursor position in spreadsheet
+                onAiCursor?.(parsed.location ? { ...parsed.location, tool_name: parsed.tool_name } : null)
               } else if (parsed.type && parsed.type !== 'content') {
                 streamingThinkingRef.current = [
                   ...streamingThinkingRef.current,
@@ -233,10 +269,10 @@ function ChatInterface({ uploadedFile, apiBaseUrl, onClearChat, onFileUpload }) 
                     return prev.map(msg =>
                       msg.id === assistantMessageId
                         ? {
-                            ...msg,
-                            content: streamingContentRef.current,
-                            thinking_steps: streamingThinkingRef.current
-                          }
+                          ...msg,
+                          content: streamingContentRef.current,
+                          thinking_steps: streamingThinkingRef.current
+                        }
                         : msg
                     )
                   } else {
@@ -268,10 +304,10 @@ function ChatInterface({ uploadedFile, apiBaseUrl, onClearChat, onFileUpload }) 
           return prev.map(msg =>
             msg.id === assistantMessageId
               ? {
-                  ...msg,
-                  content: `Error: ${error.message || 'Failed to get response from server'}`,
-                  isError: true
-                }
+                ...msg,
+                content: `Error: ${error.message || 'Failed to get response from server'}`,
+                isError: true
+              }
               : msg
           )
         } else {
@@ -371,16 +407,53 @@ function ChatInterface({ uploadedFile, apiBaseUrl, onClearChat, onFileUpload }) 
       {/* Messages Area */}
       <div className="flex-1 overflow-y-auto px-6 py-4">
         {messages.length === 0 ? (
-          <div className="h-full flex items-center justify-center">
-            <div className="text-center">
-              <h2 className="text-3xl font-medium text-gray-900 mb-2" style={{ letterSpacing: '-0.7px' }}>
-                Analyze Excel files using AI-powered tools
+          <div className="h-full flex flex-col items-center justify-center">
+            <div className="text-center mb-8">
+              <h2 className="text-lg font-medium text-gray-900 mb-2">
+                Perform analysis on your structured files
               </h2>
-              <p className="text-base text-gray-500" style={{ letterSpacing: '-0.7px' }}>
+              <p className="text-sm text-gray-500">
                 {uploadedFile
-                  ? 'Start asking questions about your data'
+                  ? `Analyzing: ${uploadedFile.filename}`
                   : 'Upload Excel files (.xlsx, .xls, .xlsm) up to 50MB'}
               </p>
+            </div>
+            
+            {/* Suggestion Cards */}
+            <div className="w-full max-w-2xl space-y-3">
+              <SuggestionCard
+                title="Summarize my data"
+                description="Get a comprehensive overview of all sheets and columns"
+                icon="summarize"
+                onClick={() => {
+                  if (uploadedFile) {
+                    handleSendMessage("Give me a comprehensive summary of all the data in this file, including key statistics and patterns.")
+                  }
+                }}
+                disabled={!uploadedFile}
+              />
+              <SuggestionCard
+                title="Find trends & patterns"
+                description="Discover correlations and trends across your data"
+                icon="trending_up"
+                onClick={() => {
+                  if (uploadedFile) {
+                    handleSendMessage("Analyze this data and identify any significant trends, patterns, or correlations.")
+                  }
+                }}
+                disabled={!uploadedFile}
+              />
+              <SuggestionCard
+                title="Create a visualization"
+                description="Generate charts and graphs from your data"
+                icon="insert_chart"
+                onClick={() => {
+                  if (uploadedFile) {
+                    handleSendMessage("Create appropriate visualizations (charts/graphs) to represent the key insights in this data.")
+                  }
+                }}
+                disabled={!uploadedFile}
+              />
             </div>
           </div>
         ) : (
@@ -405,7 +478,7 @@ function ChatInterface({ uploadedFile, apiBaseUrl, onClearChat, onFileUpload }) 
 
           {/* File indicator */}
           {uploadedFile && (
-            <div className="mb-3 flex items-center gap-2 p-2 bg-gray-50 border border-gray-200 rounded-md">
+            <div className="mb-3 flex items-center gap-2 p-2 bg-gray-50 border border-gray-200 rounded-2xl">
               <PaperclipIcon className="h-4 w-4 text-gray-600" />
               <span className="flex-1 text-sm text-gray-700 truncate">
                 {uploadedFile.filename}
@@ -420,6 +493,23 @@ function ChatInterface({ uploadedFile, apiBaseUrl, onClearChat, onFileUpload }) 
             </div>
           )}
 
+          {/* Cell reference indicator */}
+          {pendingCellReference && (
+            <div className="mb-3 flex items-center gap-2 p-2 bg-blue-50 border border-blue-200 rounded-2xl">
+              <span className="material-symbols-rounded text-blue-600 text-base">grid_on</span>
+              <span className="flex-1 text-sm text-blue-700">
+                Referencing: <span className="font-mono font-medium">{pendingCellReference.sheet}!{pendingCellReference.range}</span>
+              </span>
+              <button
+                onClick={clearPendingCellReference}
+                className="text-blue-400 hover:text-blue-600 transition-colors"
+                aria-label="Remove cell reference"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          )}
+
           {/* Upload error indicator */}
           {uploadError && (
             <div className="mb-3 p-3 bg-red-50 border border-red-100 rounded-md">
@@ -427,51 +517,109 @@ function ChatInterface({ uploadedFile, apiBaseUrl, onClearChat, onFileUpload }) 
             </div>
           )}
 
-          <PromptInput 
-            onSubmit={async ({ text }) => {
-              if (text.trim() && uploadedFile) {
-                await handleSendMessage(text)
-              }
-            }}
-            className="rounded-3xl"
-          >
-            <PromptInputBody>
-              <PromptInputTextarea
-                placeholder="Ask any deep analytical questions"
-                disabled={!uploadedFile || sending}
-                className="text-gray-600 placeholder:text-[#4B4B4B]"
-              />
-            </PromptInputBody>
-            <PromptInputFooter>
-              <PromptInputTools>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <PromptInputButton
-                      onClick={handleAttachmentClick}
-                      disabled={uploading}
-                      aria-label="Upload Excel file"
-                      className="text-gray-600 hover:text-gray-900"
-                    >
-                      <PaperclipIcon className="h-4 w-4" />
-                    </PromptInputButton>
-                  </TooltipTrigger>
-                  <TooltipContent side="top" align="center">
-                    <p>Excel files (.xlsx, .xls, .xlsm) up to 50MB</p>
-                  </TooltipContent>
-                </Tooltip>
-              </PromptInputTools>
-              <PromptInputSubmit 
-                status={sending ? 'submitted' : undefined}
-                disabled={!uploadedFile || sending}
-                className="bg-[#7c2d3a] hover:bg-[#641f2d] text-white rounded-full"
+          <PromptInputProvider>
+            <div className="[&_[data-slot=input-group]]:rounded-2xl">
+              <PromptInput
+                onSubmit={async ({ text }) => {
+                  if (text.trim() && uploadedFile) {
+                    await handleSendMessage(text)
+                  }
+                }}
               >
-                {!sending && <ArrowUp className="h-4 w-4" />}
-              </PromptInputSubmit>
-            </PromptInputFooter>
-          </PromptInput>
+              <PromptInputBody>
+                <PromptInputTextarea
+                  placeholder="Ask any deep analytical questions (type @ to mention sheets)"
+                  disabled={!uploadedFile || sending}
+                  className="text-gray-600 placeholder:text-[#4B4B4B]"
+                  suggestions={suggestions}
+                />
+              </PromptInputBody>
+              <PromptInputFooter>
+                <PromptInputTools>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <PromptInputButton
+                        onClick={handleAttachmentClick}
+                        disabled={uploading}
+                        aria-label="Upload Excel file"
+                        className="text-gray-600 hover:text-gray-900"
+                      >
+                        <PaperclipIcon className="h-4 w-4" />
+                      </PromptInputButton>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" align="center">
+                      <p>Excel files (.xlsx, .xls, .xlsm) up to 50MB</p>
+                    </TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <MentionButton />
+                    </TooltipTrigger>
+                    <TooltipContent side="top" align="center">
+                      <p>Mention a sheet (@)</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </PromptInputTools>
+                <PromptInputSubmit
+                  status={sending ? 'submitted' : undefined}
+                  disabled={!uploadedFile || sending}
+                  className="bg-[#7c2d3a] hover:bg-[#641f2d] text-white rounded-full"
+                >
+                  {!sending && <ArrowUp className="h-4 w-4" />}
+                </PromptInputSubmit>
+              </PromptInputFooter>
+            </PromptInput>
+            </div>
+          </PromptInputProvider>
         </div>
       </TooltipProvider>
     </div>
+  )
+}
+
+function MentionButton() {
+  const controller = usePromptInputController();
+
+  const handleClick = () => {
+    const current = controller.textInput.value;
+    controller.textInput.setInput(current + (current.endsWith(' ') || current.length === 0 ? '@' : ' @'));
+    // We would ideally focus the input too, but the controller doesn't expose focus directly yet.
+    // However, PromptInputTextarea listens to changes.
+    // To focus, we might need a ref to the textarea, but let's start with just appending text.
+  };
+
+  return (
+    <PromptInputButton
+      onClick={handleClick}
+      aria-label="Mention sheet"
+      className="text-gray-600 hover:text-gray-900"
+    >
+      <span className="text-lg font-medium leading-none">@</span>
+    </PromptInputButton>
+  )
+}
+
+function SuggestionCard({ title, description, icon, onClick, disabled }) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className={`w-full text-left p-4 rounded-xl border border-gray-200 bg-white hover:border-gray-300 hover:shadow-sm transition-all group ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+    >
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex-1 min-w-0">
+          <h3 className="text-base font-medium text-gray-900 mb-1 group-hover:text-gray-700">
+            {title}
+          </h3>
+          <p className="text-sm text-gray-500">
+            {description}
+          </p>
+        </div>
+        <div className="shrink-0 w-10 h-10 rounded-lg bg-gray-100 flex items-center justify-center group-hover:bg-gray-200 transition-colors">
+          <span className="material-symbols-rounded text-gray-600 text-xl">{icon}</span>
+        </div>
+      </div>
+    </button>
   )
 }
 

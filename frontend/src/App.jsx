@@ -1,10 +1,13 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import axios from 'axios'
 import ChatInterface from './components/ChatInterface'
 import StatusBar from './components/StatusBar'
 import { useAuth } from './hooks/useAuth'
 import { useAnalytics } from './hooks/useAnalytics'
 import { API_V1, API_ENDPOINTS } from '@/config/api'
+import { useSpreadsheet } from './contexts/SpreadsheetContext'
+import { SpreadsheetPanel } from './components/SpreadsheetPanel'
+import { TopBar } from './components/TopBar'
 import {
   Sidebar,
   SidebarContent,
@@ -35,6 +38,48 @@ function App() {
   const [systemStatus, setSystemStatus] = useState(null)
   const [loading, setLoading] = useState(true)
   const [uploadKey, setUploadKey] = useState(0)
+
+  // Resizable Sidebar State
+  const [sidebarWidth, setSidebarWidth] = useState(450)
+  const [isResizing, setIsResizing] = useState(false)
+  const [mode, setMode] = useState('sheet') // 'chat' or 'sheet'
+
+  const startResizing = useCallback((mouseDownEvent) => {
+    mouseDownEvent.preventDefault();
+    setIsResizing(true);
+  }, []);
+
+  const stopResizing = useCallback(() => {
+    setIsResizing(false);
+  }, []);
+
+  const resize = useCallback(
+    (mouseMoveEvent) => {
+      if (isResizing) {
+        const newWidth = mouseMoveEvent.clientX;
+        if (newWidth > 300 && newWidth < window.innerWidth - 100) {
+          setSidebarWidth(newWidth);
+        }
+      }
+    },
+    [isResizing]
+  );
+
+  const handleModeChange = (newMode) => {
+    setMode(newMode)
+  }
+
+  useEffect(() => {
+    window.addEventListener("mousemove", resize);
+    window.addEventListener("mouseup", stopResizing);
+    return () => {
+      window.removeEventListener("mousemove", resize);
+      window.removeEventListener("mouseup", stopResizing);
+    };
+  }, [resize, stopResizing]);
+
+  // accessing the context
+  const { loadSheets, clearSpreadsheet, handleSheetUpdate } = useSpreadsheet()
 
   useEffect(() => {
     checkSystemStatus()
@@ -72,6 +117,8 @@ function App() {
       })
 
       setUploadedFile(response.data)
+      // Load spreadsheet data
+      loadSheets(response.data.filename)
 
       // Track successful file upload
       const processingTime = Date.now() - startTime
@@ -104,6 +151,7 @@ function App() {
   const handleClearChat = () => {
     setUploadedFile(null)
     setUploadKey(prev => prev + 1)
+    clearSpreadsheet()
   }
 
   if (loading) {
@@ -149,93 +197,44 @@ function App() {
   }
 
   return (
-    <SidebarProvider>
-      <div className="min-h-screen flex w-full bg-white">
-          {/* Sidebar */}
-          <Sidebar>
-            {/* Sidebar Header */}
-            <SidebarHeader className="border-b border-gray-100 px-4 py-4">
-              <div className="flex items-center gap-2">
-                <img src="/alkanalyst.svg" alt="ALK analyst" className="h-6" />
-                <span className="text-[10px] font-sans font-medium text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded whitespace-nowrap">
-                  Early Preview
-                </span>
-              </div>
-            </SidebarHeader>
+    <div className="h-screen flex flex-col w-full bg-gray-50 overflow-hidden">
+      {/* Top Bar */}
+      <TopBar mode={mode} onModeChange={handleModeChange} />
 
-            {/* Sidebar Content */}
-            <SidebarContent>
-              <SidebarGroup>
-                <div className="flex items-center justify-between px-2 mb-3">
-                  <SidebarGroupLabel className="mb-0 justify-start">System Status</SidebarGroupLabel>
-                  <button
-                    onClick={checkSystemStatus}
-                    className="text-gray-400 hover:text-gray-600 transition-colors"
-                  >
-                    <svg
-                      className="h-4 w-4"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                      />
-                    </svg>
-                  </button>
-                </div>
-                <SidebarGroupContent>
-                  <StatusBar status={systemStatus} onRefresh={checkSystemStatus} />
-                </SidebarGroupContent>
-              </SidebarGroup>
-            </SidebarContent>
+      {/* Main Content - Split Layout */}
+      <main className="flex-1 flex overflow-hidden p-4 gap-4">
+        {/* Left Panel - Chat */}
+        <div
+          style={{ width: mode === 'sheet' ? sidebarWidth : '100%' }}
+          className="flex flex-col h-full shrink-0 bg-white rounded-2xl shadow-lg border border-gray-100 z-[100] relative group transition-[width] duration-0 ease-linear overflow-hidden"
+        >
+          <div className="flex-1 overflow-hidden h-full">
+            <ChatInterface
+              uploadedFile={uploadedFile}
+              apiBaseUrl={API_BASE_URL}
+              onClearChat={handleClearChat}
+              onFileUpload={handleFileUpload}
+              onSheetUpdated={handleSheetUpdate}
+            />
+          </div>
 
-            {/* Sidebar Footer */}
-            <SidebarFooter className="border-t border-gray-100 p-4">
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <button className="flex items-center gap-3 w-full hover:bg-gray-50 rounded-lg p-2 transition-colors">
-                    <Avatar className="h-8 w-8">
-                      <AvatarFallback className="bg-gray-200 text-gray-700 text-sm">
-                        {getUserInitials()}
-                      </AvatarFallback>
-                    </Avatar>
-                    <div className="flex flex-col items-start text-sm">
-                      <span className="font-medium text-gray-900">
-                        {user?.full_name || user?.email?.split('@')[0] || 'User'}
-                      </span>
-                      <span className="text-xs text-gray-500">
-                        {user?.email || 'Loading...'}
-                      </span>
-                    </div>
-                  </button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-48">
-                  <DropdownMenuItem onClick={handleLogout} className="cursor-pointer">
-                    <LogOut className="mr-2 h-4 w-4" />
-                    <span>Logout</span>
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </SidebarFooter>
-          </Sidebar>
+          {/* Resize Handle */}
+          {mode === 'sheet' && (
+            <div
+              className={`absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-400 transition-colors z-50 flex items-center justify-center ${isResizing ? 'bg-blue-600' : 'bg-transparent hover:bg-gray-300'}`}
+              onMouseDown={startResizing}
+            />
+          )}
+        </div>
 
-          {/* Main Content */}
-          <main className="flex-1 overflow-hidden">
-            <div className="h-full p-6">
-              <ChatInterface
-                uploadedFile={uploadedFile}
-                apiBaseUrl={API_BASE_URL}
-                onClearChat={handleClearChat}
-                onFileUpload={handleFileUpload}
-              />
-            </div>
-          </main>
-      </div>
-    </SidebarProvider>
+        {/* Right Panel - Spreadsheet */}
+        {mode === 'sheet' && (
+          <div className="flex-1 h-full overflow-hidden bg-white rounded-2xl shadow-lg border border-gray-100">
+            <SpreadsheetPanel />
+          </div>
+        )}
+      </main>
+    </div>
   )
 }
 

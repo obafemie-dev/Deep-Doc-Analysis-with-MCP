@@ -89,6 +89,18 @@ async def get_current_user(
             detail="Not authenticated. Please log in."
         )
 
+    # DEVELOPMENT BYPASS
+    if stytch_session == "dev-session":
+        # Return a mock user object without database access
+        # This allows development without a working database
+        return User(
+            stytch_user_id="user-test-dev-bypass",
+            email="dev@example.com",
+            full_name="Developer User",
+            created_at=datetime.utcnow(),
+            subscription_tier="pro"
+        )
+
     try:
         # Validate session with Stytch (JWT validation, very fast)
         stytch_resp = stytch_client.sessions.authenticate(
@@ -113,6 +125,8 @@ async def get_current_user(
         raise
     except Exception as e:
         logger.error(f"Session validation failed: {str(e)}")
+        # Start of bypass fallback if Stytch is misconfigured but we want to fail open for dev? 
+        # No, better to be explicit with the dev-session cookie.
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=f"Invalid or expired session: {str(e)}"
@@ -224,6 +238,7 @@ async def authenticate_magic_link(
             httponly=True,
             secure=is_production,  # True for HTTPS, False for HTTP
             samesite="lax",
+            path="/",  # Make cookie available for all paths
             max_age=604800  # 7 days in seconds
         )
 
@@ -245,6 +260,38 @@ async def authenticate_magic_link(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=f"Authentication failed: {str(e)}"
         )
+
+
+@router.post("/dev-login", response_model=AuthenticateResponse)
+async def dev_login(response: Response, db: AsyncSession = Depends(get_analytics_db)):
+    """
+    Development login endpoint to bypass Stytch authentication.
+    Sets a specific cookie that the backend recognizes as a bypass.
+    """
+    # Create user if needed (handled in get_current_user but good to do here too if we want to return it)
+    # For simplicity, we just set the cookie and return a dummy success
+    
+    response.set_cookie(
+        key="stytch_session",
+        value="dev-session",
+        httponly=True,
+        secure=False,
+        samesite="lax",
+        path="/",  # Make cookie available for all paths
+        max_age=604800
+    )
+    
+    return AuthenticateResponse(
+        success=True,
+        user=UserResponse(
+            stytch_user_id="user-test-dev-bypass",
+            email="dev@example.com",
+            full_name="Developer User",
+            created_at=datetime.utcnow(),
+            subscription_tier="pro"
+        ),
+        session_token="dev-session"
+    )
 
 
 @router.post("/logout", response_model=LogoutResponse)

@@ -1,4 +1,31 @@
 import { useState } from 'react'
+import { ChevronDown, ChevronRight, Code, AlertCircle, Loader2 } from 'lucide-react'
+
+function CodeBlock({ code, title }) {
+  const [isExpanded, setIsExpanded] = useState(false)
+  
+  if (!code || Object.keys(code).length === 0) return null
+  
+  const formattedCode = JSON.stringify(code, null, 2)
+  
+  return (
+    <div className="mt-1 ml-5">
+      <button
+        onClick={() => setIsExpanded(!isExpanded)}
+        className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-700 transition-colors"
+      >
+        {isExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+        <Code className="h-3 w-3" />
+        <span>{title}</span>
+      </button>
+      {isExpanded && (
+        <pre className="mt-1 p-2 bg-gray-900 text-gray-100 rounded-md text-xs overflow-x-auto max-h-48 overflow-y-auto">
+          <code>{formattedCode}</code>
+        </pre>
+      )}
+    </div>
+  )
+}
 
 function ThinkingSteps({ steps }) {
   // Auto-expand if there are errors to show transparency
@@ -20,24 +47,6 @@ function ThinkingSteps({ steps }) {
     return 'Processing...'
   }
 
-  // Get icon for step type
-  const getStepIcon = (type) => {
-    switch (type) {
-      case 'thinking_start':
-        return '🔍'
-      case 'tool_start':
-        return '⚙️'
-      case 'tool_complete':
-        return '✓'
-      case 'tool_error':
-        return '⚠️'
-      case 'thinking':
-        return '💭'
-      default:
-        return '•'
-    }
-  }
-
   // Format tool name for display
   const formatToolName = (toolName) => {
     if (!toolName) return ''
@@ -48,22 +57,38 @@ function ThinkingSteps({ steps }) {
       .join(' ')
   }
 
-  // Get step display text
-  const getStepText = (step) => {
-    switch (step.type) {
-      case 'thinking_start':
-        return step.message || 'Starting analysis...'
-      case 'tool_start':
-        return `${formatToolName(step.tool_name)}...`
-      case 'tool_complete':
-        return `${formatToolName(step.tool_name)} - ${step.summary || 'Completed'}`
-      case 'tool_error':
-        return `${formatToolName(step.tool_name)} - Error: ${step.error}`
-      case 'thinking':
-        return step.message || 'Processing...'
-      default:
-        return JSON.stringify(step)
+  // Group steps by tool execution
+  const groupedSteps = []
+  let currentGroup = null
+
+  steps.forEach((step) => {
+    if (step.type === 'thinking_start') {
+      groupedSteps.push({ type: 'thinking', step })
+    } else if (step.type === 'tool_start') {
+      currentGroup = { 
+        toolName: step.tool_name, 
+        input: step.input, 
+        status: 'running',
+        result: null,
+        error: null
+      }
+    } else if (step.type === 'tool_complete' && currentGroup) {
+      currentGroup.status = 'completed'
+      currentGroup.result = step.result
+      currentGroup.summary = step.summary
+      groupedSteps.push({ type: 'tool', ...currentGroup })
+      currentGroup = null
+    } else if (step.type === 'tool_error' && currentGroup) {
+      currentGroup.status = 'error'
+      currentGroup.error = step.error
+      groupedSteps.push({ type: 'tool', ...currentGroup })
+      currentGroup = null
     }
+  })
+
+  // Add any in-progress tool
+  if (currentGroup) {
+    groupedSteps.push({ type: 'tool', ...currentGroup })
   }
 
   return (
@@ -73,27 +98,58 @@ function ThinkingSteps({ steps }) {
         onClick={() => setIsExpanded(!isExpanded)}
         className="flex items-center gap-2 text-gray-600 hover:text-gray-800 transition-colors"
       >
-        <span className="text-base">🔍</span>
+        <span className="material-symbols-rounded text-base">function</span>
         <span className="font-medium">{getSummary()}</span>
         <span className="text-xs text-gray-400">
-          ({isExpanded ? 'collapse' : 'expand'})
+          {isExpanded ? <ChevronDown className="h-3 w-3 inline" /> : <ChevronRight className="h-3 w-3 inline" />}
         </span>
       </button>
 
       {/* Expanded details */}
       {isExpanded && (
-        <div className="mt-2 ml-6 space-y-1 border-l-2 border-gray-200 pl-3">
-          {steps.map((step, index) => (
-            <div
-              key={index}
-              className={`flex items-start gap-2 ${
-                step.type === 'tool_error' ? 'text-red-600' : 'text-gray-600'
-              }`}
-            >
-              <span className="text-base leading-none mt-0.5">
-                {getStepIcon(step.type)}
-              </span>
-              <span className="flex-1">{getStepText(step)}</span>
+        <div className="mt-2 ml-4 space-y-2">
+          {groupedSteps.map((group, index) => (
+            <div key={index}>
+              {group.type === 'thinking' && (
+                <div className="flex items-center gap-2 text-gray-500 text-xs">
+                  <span className="material-symbols-rounded text-sm">psychology</span>
+                  <span>{group.step.message || 'Analyzing...'}</span>
+                </div>
+              )}
+              {group.type === 'tool' && (
+                <div className="border border-gray-200 rounded-lg p-2 bg-white">
+                  <div className="flex items-center gap-2">
+                    {group.status === 'running' && (
+                      <Loader2 className="h-4 w-4 text-blue-500 animate-spin" />
+                    )}
+                    {group.status === 'completed' && (
+                      <span className="material-symbols-rounded text-green-500 text-base">check_circle</span>
+                    )}
+                    {group.status === 'error' && (
+                      <AlertCircle className="h-4 w-4 text-red-500" />
+                    )}
+                    <span className="font-medium text-gray-700">
+                      {formatToolName(group.toolName)}
+                    </span>
+                    {group.summary && (
+                      <span className="text-xs text-gray-500">— {group.summary}</span>
+                    )}
+                  </div>
+                  
+                  {/* Code blocks */}
+                  {group.input && Object.keys(group.input).length > 0 && (
+                    <CodeBlock code={group.input} title="Input Parameters" />
+                  )}
+                  {group.result && (
+                    <CodeBlock code={group.result} title="Output" />
+                  )}
+                  {group.error && (
+                    <div className="mt-1 ml-5 p-2 bg-red-50 text-red-700 rounded text-xs">
+                      Error: {group.error}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           ))}
         </div>

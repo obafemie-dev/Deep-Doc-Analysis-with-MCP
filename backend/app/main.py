@@ -26,6 +26,7 @@ from .middleware.analytics_middleware import AnalyticsMiddleware
 from .routers import analytics
 from .routers import metabase_proxy
 from .routers import auth
+from .routers import spreadsheet
 # Import models to register them with SQLAlchemy Base.metadata before init_analytics_db
 from .models import analytics as analytics_models  # noqa: F401
 from .models import user  # noqa: F401
@@ -70,9 +71,18 @@ if settings.METABASE_ENABLED:
 app.include_router(auth.router, prefix=settings.API_V1_STR)
 logger.info("Authentication endpoints enabled at /api/v1/auth")
 
-# Ensure upload directory exists
-UPLOAD_DIR = Path(settings.UPLOAD_DIR)
-UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+# Include spreadsheet router
+app.include_router(spreadsheet.router)
+logger.info("Spreadsheet endpoints enabled at /api/v1/spreadsheet")
+
+# Resolve upload directory path relative to backend directory
+# Get the backend directory (parent of app directory)
+BACKEND_DIR = Path(__file__).parent.parent
+if Path(settings.UPLOAD_DIR).is_absolute():
+    UPLOAD_DIR = Path(settings.UPLOAD_DIR)
+else:
+    # Resolve relative to backend directory
+    UPLOAD_DIR = (BACKEND_DIR / settings.UPLOAD_DIR).resolve()
 
 
 # ============================================================================
@@ -83,6 +93,14 @@ UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 async def startup_event():
     """Initialize application on startup"""
     logger.info("Starting application...")
+
+    # Ensure upload directory exists
+    try:
+        UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+        logger.info(f"Upload directory ready: {UPLOAD_DIR}")
+    except Exception as e:
+        logger.error(f"Failed to create upload directory: {e}")
+        raise
 
     # Initialize analytics database
     if settings.ANALYTICS_ENABLED:

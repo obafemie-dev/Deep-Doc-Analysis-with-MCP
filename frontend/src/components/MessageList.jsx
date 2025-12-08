@@ -35,7 +35,7 @@ function MessageList({ messages }) {
                 ? 'bg-[#5219281A] text-[#521928]'
                 : message.isError
                 ? 'bg-red-50 border border-red-200 text-red-800'
-                : 'bg-gray-100 text-gray-900'
+                : 'text-gray-900'
             }`}
           >
             {/* Message Header */}
@@ -52,6 +52,14 @@ function MessageList({ messages }) {
                 </>
               )}
             </div>
+
+            {/* Cell Reference Badge - Show for user messages with cell reference */}
+            {message.role === 'user' && message.cellReference && (
+              <div className="mb-2 inline-flex items-center gap-1.5 px-2 py-1 bg-blue-100 text-blue-700 rounded-md text-xs">
+                <span className="material-symbols-rounded text-sm">grid_on</span>
+                <span className="font-mono">{message.cellReference}</span>
+              </div>
+            )}
 
             {/* Chain of Thought - Show thinking steps for assistant messages */}
             {message.role === 'assistant' && message.thinking_steps && message.thinking_steps.length > 0 && (

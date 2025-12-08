@@ -329,10 +329,10 @@ class AnalyticsService:
 
     async def log_error(
         self,
-        session_id: Optional[str],
-        user_id: Optional[str],
         error_type: str,
         error_message: str,
+        session_id: Optional[str] = None,
+        user_id: Optional[str] = None,
         stack_trace: Optional[str] = None,
         endpoint: Optional[str] = None,
         request_data: Optional[Dict[str, Any]] = None

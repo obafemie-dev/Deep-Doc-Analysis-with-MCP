@@ -1,0 +1,86 @@
+/* Compact spreadsheet styling */
+.spreadsheet-compact .Spreadsheet {
+  font-size: 11px;
+  color: #000;
+}
+
+.spreadsheet-compact .Spreadsheet__header {
+  min-width: 30px;
+  padding: 2px 4px;
+  font-size: 10px;
+  background: #f8f9fa;
+}
+
+.spreadsheet-compact .Spreadsheet__cell {
+  min-width: 60px;
+  max-width: 150px;
+  padding: 2px 4px;
+  height: 20px;
+  line-height: 16px;
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  border-color: #e5e7eb;
+  color: #000 !important;
+}
+
+.spreadsheet-compact .Spreadsheet__cell--readonly {
+  background: #fff;
+}
+
+.spreadsheet-compact .Spreadsheet__header-row .Spreadsheet__header {
+  position: relative;
+  cursor: col-resize;
+  user-select: none;
+}
+
+/* Column resize handle */
+.spreadsheet-compact .Spreadsheet__header-row .Spreadsheet__header::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  cursor: col-resize;
+  background: transparent;
+}
+
+.spreadsheet-compact .Spreadsheet__header-row .Spreadsheet__header:hover::after {
+  background: #d1d5db;
+}
+
+/* Row headers compact */
+.spreadsheet-compact .Spreadsheet__row-label {
+  min-width: 30px;
+  padding: 2px 4px;
+  font-size: 10px;
+  text-align: center;
+  background: #f8f9fa;
+  color: #6b7280;
+}
+
+/* Make table more compact */
+.spreadsheet-compact table {
+  border-collapse: collapse;
+}
+
+.spreadsheet-compact th,
+.spreadsheet-compact td {
+  border: 1px solid #e5e7eb;
+}
+
+/* Selected cell styling */
+.spreadsheet-compact .Spreadsheet__cell--selected {
+  background: #ecfdf5 !important;
+  border-color: #10b981 !important;
+}
+
+/* Header styling */
+.spreadsheet-compact .Spreadsheet__header {
+  background: #f3f4f6;
+  color: #374151;
+  font-weight: 500;
+  text-align: center;
+}

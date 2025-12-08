@@ -102,7 +102,7 @@ export function PromptInputProvider({
   // ----- attachments state (global when wrapped)
   const [attachements, setAttachements] = useState([]);
   const fileInputRef = useRef(null);
-  const openRef = useRef(() => {});
+  const openRef = useRef(() => { });
 
   const add = useCallback((files) => {
     const incoming = Array.from(files);
@@ -430,25 +430,25 @@ export const PromptInput = ({
   const remove = usingProvider
     ? (id) => controller.attachments.remove(id)
     : (id) =>
-        setItems((prev) => {
-          const found = prev.find((file) => file.id === id);
-          if (found?.url) {
-            URL.revokeObjectURL(found.url);
-          }
-          return prev.filter((file) => file.id !== id);
-        });
+      setItems((prev) => {
+        const found = prev.find((file) => file.id === id);
+        if (found?.url) {
+          URL.revokeObjectURL(found.url);
+        }
+        return prev.filter((file) => file.id !== id);
+      });
 
   const clear = usingProvider
     ? () => controller.attachments.clear()
     : () =>
-        setItems((prev) => {
-          for (const file of prev) {
-            if (file.url) {
-              URL.revokeObjectURL(file.url);
-            }
+      setItems((prev) => {
+        for (const file of prev) {
+          if (file.url) {
+            URL.revokeObjectURL(file.url);
           }
-          return [];
-        });
+        }
+        return [];
+      });
 
   const openFileDialog = usingProvider
     ? () => controller.attachments.openFileDialog()
@@ -559,9 +559,9 @@ export const PromptInput = ({
     const text = usingProvider
       ? controller.textInput.value
       : (() => {
-          const formData = new FormData(form);
-          return (formData.get("message")) || "";
-        })();
+        const formData = new FormData(form);
+        return (formData.get("message")) || "";
+      })();
 
     // Reset form immediately after capturing text to avoid race condition
     // where user input during async blob conversion would be lost
@@ -621,7 +621,7 @@ export const PromptInput = ({
         title="Upload files"
         type="file" />
       <form className={cn("w-full", className)} onSubmit={handleSubmit} {...props}>
-        <InputGroup className="overflow-hidden">{children}</InputGroup>
+        <InputGroup className="overflow-visible">{children}</InputGroup>
       </form>
     </>
   );
@@ -646,13 +646,102 @@ export const PromptInputTextarea = ({
   onChange,
   className,
   placeholder = "What would you like to know?",
+  suggestions = [],
   ...props
 }) => {
   const controller = useOptionalPromptInputController();
   const attachments = usePromptInputAttachments();
   const [isComposing, setIsComposing] = useState(false);
 
+  // Mention state
+  const [mentionOpen, setMentionOpen] = useState(false);
+  const [mentionQuery, setMentionQuery] = useState("");
+  const [mentionIndex, setMentionIndex] = useState(-1); // Index of selected item
+  const [cursorPos, setCursorPos] = useState(0);
+  const textareaRef = useRef(null);
+
+  const filteredSuggestions = useMemo(() => {
+    if (!mentionQuery) return suggestions;
+    return suggestions.filter(item =>
+      item.label.toLowerCase().includes(mentionQuery.toLowerCase())
+    );
+  }, [suggestions, mentionQuery]);
+
+  // Handle input changes to detect trigger
+  const handleChange = (e) => {
+    const newVal = e.currentTarget.value;
+    const newCursorPos = e.currentTarget.selectionStart;
+    setCursorPos(newCursorPos);
+
+    // Check for mention trigger
+    const textBeforeCursor = newVal.slice(0, newCursorPos);
+    const lastAt = textBeforeCursor.lastIndexOf("@");
+
+    if (lastAt !== -1) {
+      const textAfterAt = textBeforeCursor.slice(lastAt + 1);
+      // specific constraint: no spaces allowed in search query for now to keep it simple
+      // or allow spaces if we want multi-word sheet names
+      if (!textAfterAt.includes("\n")) {
+        setMentionOpen(true);
+        setMentionQuery(textAfterAt);
+        setMentionIndex(0); // Reset selection
+      } else {
+        setMentionOpen(false);
+      }
+    } else {
+      setMentionOpen(false);
+    }
+
+    // Propagate change
+    if (controller) {
+      controller.textInput.setInput(newVal);
+    }
+    onChange?.(e);
+  };
+
+  const insertMention = (item) => {
+    const text = controller ? controller.textInput.value : textareaRef.current.value;
+    const textBeforeCursor = text.slice(0, cursorPos);
+    const lastAt = textBeforeCursor.lastIndexOf("@");
+    const textAfterCursor = text.slice(cursorPos);
+
+    const newText = text.slice(0, lastAt) + `@${item.label} ` + textAfterCursor;
+
+    if (controller) {
+      controller.textInput.setInput(newText);
+    } else {
+      // Manual ref update if not controlled (fallback)
+      if (textareaRef.current) textareaRef.current.value = newText;
+    }
+
+    setMentionOpen(false);
+    // Need to defer focus/cursor setting in real impl, but simplified here
+  };
+
   const handleKeyDown = (e) => {
+    if (mentionOpen && filteredSuggestions.length > 0) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setMentionIndex(prev => (prev + 1) % filteredSuggestions.length);
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setMentionIndex(prev => (prev - 1 + filteredSuggestions.length) % filteredSuggestions.length);
+        return;
+      }
+      if (e.key === "Enter" || e.key === "Tab") {
+        e.preventDefault();
+        insertMention(filteredSuggestions[mentionIndex]);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setMentionOpen(false);
+        return;
+      }
+    }
+
     if (e.key === "Enter") {
       if (isComposing || e.nativeEvent.isComposing) {
         return;
@@ -712,27 +801,48 @@ export const PromptInputTextarea = ({
 
   const controlledProps = controller
     ? {
-        value: controller.textInput.value,
-        onChange: (e) => {
-          controller.textInput.setInput(e.currentTarget.value);
-          onChange?.(e);
-        },
-      }
+      value: controller.textInput.value,
+      onChange: handleChange, // Use local handler
+    }
     : {
-        onChange,
-      };
+      onChange: handleChange,
+    };
 
   return (
-    <InputGroupTextarea
-      className={cn("field-sizing-content max-h-48 min-h-16", className)}
-      name="message"
-      onCompositionEnd={() => setIsComposing(false)}
-      onCompositionStart={() => setIsComposing(true)}
-      onKeyDown={handleKeyDown}
-      onPaste={handlePaste}
-      placeholder={placeholder}
-      {...props}
-      {...controlledProps} />
+    <div className="relative w-full">
+      {mentionOpen && filteredSuggestions.length > 0 && (
+        <div className="absolute bottom-full mb-2 left-0 w-64 bg-white rounded-lg shadow-lg border border-gray-200 overflow-hidden z-50">
+          <div className="p-1">
+            <div className="px-2 py-1.5 text-xs font-semibold text-gray-500">Suggested Sheets</div>
+            {filteredSuggestions.map((item, idx) => (
+              <button
+                key={item.id || idx}
+                className={cn(
+                  "w-full text-left px-2 py-1.5 text-sm rounded-md flex items-center gap-2",
+                  idx === mentionIndex ? "bg-accent text-accent-foreground" : "hover:bg-gray-100"
+                )}
+                onClick={() => insertMention(item)}
+              >
+                {item.icon && <span className="w-4 h-4">{item.icon}</span>}
+                <span>{item.label}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      <InputGroupTextarea
+        ref={textareaRef}
+        className={cn("field-sizing-content max-h-48 min-h-16", className)}
+        name="message"
+        onCompositionEnd={() => setIsComposing(false)}
+        onCompositionStart={() => setIsComposing(true)}
+        onKeyDown={handleKeyDown}
+        onPaste={handlePaste}
+        placeholder={placeholder}
+        {...props}
+        {...controlledProps}
+      />
+    </div>
   );
 };
 

@@ -69,8 +69,9 @@ class Settings(BaseSettings):
     FRONTEND_URL: str = "http://localhost:3000"
 
     class Config:
-        env_file = "../../.env"
+        env_file = ".env"  # Relative to CWD (backend/)
         case_sensitive = True
+        extra = "ignore"
 
 
 settings = Settings()

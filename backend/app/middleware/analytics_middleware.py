@@ -17,11 +17,20 @@ from ..services.analytics_service import AnalyticsService
 logger = logging.getLogger(__name__)
 
 # Initialize Stytch client for user ID extraction
-stytch_client = StytchClient(
-    project_id=settings.STYTCH_PROJECT_ID,
-    secret=settings.STYTCH_SECRET,
-    environment=settings.STYTCH_ENV
-)
+# Initialize Stytch client for user ID extraction
+try:
+    if settings.STYTCH_PROJECT_ID and settings.STYTCH_SECRET:
+        stytch_client = StytchClient(
+            project_id=settings.STYTCH_PROJECT_ID,
+            secret=settings.STYTCH_SECRET,
+            environment=settings.STYTCH_ENV
+        )
+    else:
+        logger.warning("Stytch credentials not configured. User tracking disabled.")
+        stytch_client = None
+except Exception as e:
+    logger.error(f"Failed to initialize Stytch client: {e}")
+    stytch_client = None
 
 
 class AnalyticsMiddleware(BaseHTTPMiddleware):
@@ -69,7 +78,7 @@ class AnalyticsMiddleware(BaseHTTPMiddleware):
         # Extract user_id from Stytch session cookie
         user_id: Optional[str] = None
         stytch_session = request.cookies.get("stytch_session")
-        if stytch_session:
+        if stytch_session and stytch_client:
             try:
                 # Validate session and extract user_id (non-blocking validation)
                 stytch_resp = stytch_client.sessions.authenticate(session_token=stytch_session)

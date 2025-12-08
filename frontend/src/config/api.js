@@ -1,5 +1,5 @@
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
-const API_V1 = `${API_BASE_URL}/api/v1`
+// Use relative path so Vite proxy handles it (cookies work correctly on same origin)
+const API_V1 = '/api/v1'
 
 export const API_ENDPOINTS = {
   // Auth endpoints
@@ -7,6 +7,7 @@ export const API_ENDPOINTS = {
   AUTHENTICATE: `${API_V1}/auth/authenticate`,
   LOGOUT: `${API_V1}/auth/logout`,
   ME: `${API_V1}/auth/me`,
+  DEV_LOGIN: `${API_V1}/auth/dev-login`,
 
   // App endpoints
   STATUS: `${API_V1}/status`,
@@ -21,4 +22,4 @@ export const API_ENDPOINTS = {
   ANALYTICS_FEEDBACK: `${API_V1}/analytics/feedback`,
 }
 
-export { API_BASE_URL, API_V1 }
+export { API_V1 }

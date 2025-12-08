@@ -12,7 +12,7 @@ export default defineConfig({
   },
   server: {
     host: '0.0.0.0', // This is fine
-    port: 5173,      // This is fine
+    port: 3000,      // This is fine
     proxy: {
       '/api': {
         target: 'http://localhost:8000', // This is also fine

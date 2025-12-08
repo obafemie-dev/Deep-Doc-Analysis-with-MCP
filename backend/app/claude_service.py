@@ -3,6 +3,7 @@ Claude LLM Service - Single-turn integration with Anthropic Claude and MCP tools
 """
 import json
 import logging
+from pathlib import Path
 from anthropic import Anthropic
 from typing import List, Dict, Any, Optional, AsyncGenerator
 from .config import settings
@@ -344,7 +345,8 @@ class ClaudeLLMService:
             iteration=0,
             max_iterations=5,
             stream=stream,
-            session_id=session_id
+            session_id=session_id,
+            file_path=file_path
         ):
             yield chunk
 
@@ -357,7 +359,8 @@ class ClaudeLLMService:
         max_iterations: int = 5,
         accumulated_tokens: int = 0,
         stream: bool = False,
-        session_id: Optional[str] = None
+        session_id: Optional[str] = None,
+        file_path: Optional[str] = None
     ) -> AsyncGenerator[str, None]:
         """
         Handle Claude response with controlled iteration loop
@@ -445,12 +448,25 @@ class ClaudeLLMService:
 
             # Notify user that tool is starting (chain of thought)
             if stream:
+                # Sanitize input for display (remove file_path for cleaner display)
+                display_args = {k: v for k, v in function_args.items() if k != 'file_path'}
                 yield {
                     "type": "tool_start",
                     "tool_name": function_name,
                     "step": idx,
-                    "total_steps": len(tool_calls)
+                    "total_steps": len(tool_calls),
+                    "input": display_args
                 }
+                
+                # Emit AI cursor event for sheet-related tools
+                cursor_location = self._extract_cursor_location(function_name, function_args)
+                if cursor_location:
+                    yield {
+                        "type": "ai_cursor",
+                        "action": "move",
+                        "tool_name": function_name,
+                        "location": cursor_location
+                    }
 
             # Execute MCP tool
             try:
@@ -465,11 +481,42 @@ class ClaudeLLMService:
                 # Notify user of successful completion (chain of thought)
                 if stream:
                     summary = self._summarize_tool_result(function_name, result)
+                    # Sanitize result for display (truncate if too long)
+                    display_result = result
+                    if isinstance(result, dict):
+                        display_result = {k: (v[:200] + '...' if isinstance(v, str) and len(v) > 200 else v) for k, v in result.items()}
                     yield {
                         "type": "tool_complete",
                         "tool_name": function_name,
-                        "summary": summary
+                        "summary": summary,
+                        "result": display_result
                     }
+
+                    # Check for sheet updates
+                    SHEET_MODIFYING_TOOLS = {
+                        'create_chart', 'create_pivot_table', 'create_dashboard', 'create_table',
+                        'write_data_to_excel', 'apply_formula', 'format_range', 'insert_rows',
+                        'insert_columns', 'delete_rows', 'delete_columns', 'create_worksheet',
+                        'delete_worksheet', 'rename_worksheet', 'copy_worksheet'
+                    }
+
+                    if function_name in SHEET_MODIFYING_TOOLS:
+                        # Extract filename from file_path if available
+                        filename = None
+                        if file_path:
+                            filename = Path(file_path).name
+                        
+                        # Determine relevant sheet name (some tools use target_sheet)
+                        sheet_name = function_args.get('sheet_name')
+                        if not sheet_name and 'target_sheet' in function_args:
+                            sheet_name = function_args.get('target_sheet')
+
+                        yield {
+                            "type": "sheet_updated",
+                            "filename": filename,
+                            "sheet_name": sheet_name,
+                            "action": function_name
+                        }
 
                 # Store for Claude follow-up (internal only)
                 tool_results.append({
@@ -598,7 +645,8 @@ class ClaudeLLMService:
                             max_iterations=max_iterations,
                             accumulated_tokens=current_tokens,
                             stream=stream,  # Preserve streaming for final response
-                            session_id=session_id
+                            session_id=session_id,
+                            file_path=file_path
                         ):
                             yield chunk
             else:
@@ -620,9 +668,88 @@ class ClaudeLLMService:
                     max_iterations=max_iterations,
                     accumulated_tokens=current_tokens,  # Pass tokens forward
                     stream=stream,  # Pass streaming flag
-                    session_id=session_id
+                    session_id=session_id,
+                    file_path=file_path
                 ):
                     yield chunk
+
+    def _extract_cursor_location(self, tool_name: str, args: dict) -> dict | None:
+        """
+        Extract cursor location from tool arguments for AI cursor display.
+        
+        Args:
+            tool_name: Name of the tool being executed
+            args: Tool arguments
+            
+        Returns:
+            Location dict with sheet_name, row, col, and optionally end_row, end_col
+        """
+        # Tools that work with specific cells/ranges
+        CELL_TOOLS = {
+            'read_cell', 'write_cell', 'get_cell_value', 'set_cell_value',
+            'apply_formula', 'format_cell'
+        }
+        
+        RANGE_TOOLS = {
+            'read_range', 'write_range', 'read_data_range', 'get_range_values',
+            'format_range', 'create_chart', 'create_pivot_table', 'create_table',
+            'write_data_to_excel', 'analyze_excel_data', 'get_workbook_metadata'
+        }
+        
+        location = {}
+        
+        # Extract sheet name
+        sheet_name = args.get('sheet_name') or args.get('worksheet') or args.get('target_sheet')
+        if sheet_name:
+            location['sheet_name'] = sheet_name
+        
+        # Extract cell location (for single cell operations)
+        if tool_name in CELL_TOOLS:
+            cell = args.get('cell') or args.get('cell_address')
+            if cell:
+                location['cell'] = cell
+                # Parse cell address like "A1" to row/col
+                import re
+                match = re.match(r'([A-Z]+)(\d+)', cell.upper())
+                if match:
+                    col_str, row_str = match.groups()
+                    col = sum((ord(c) - ord('A') + 1) * (26 ** i) for i, c in enumerate(reversed(col_str))) - 1
+                    location['row'] = int(row_str) - 1
+                    location['col'] = col
+            else:
+                row = args.get('row')
+                col = args.get('col') or args.get('column')
+                if row is not None:
+                    location['row'] = int(row) - 1  # Convert to 0-indexed
+                if col is not None:
+                    location['col'] = int(col) - 1
+        
+        # Extract range location
+        if tool_name in RANGE_TOOLS:
+            range_addr = args.get('range') or args.get('data_range') or args.get('cell_range')
+            if range_addr:
+                location['range'] = range_addr
+                # Parse range like "A1:C10"
+                import re
+                match = re.match(r'([A-Z]+)(\d+):([A-Z]+)(\d+)', range_addr.upper())
+                if match:
+                    start_col_str, start_row, end_col_str, end_row = match.groups()
+                    start_col = sum((ord(c) - ord('A') + 1) * (26 ** i) for i, c in enumerate(reversed(start_col_str))) - 1
+                    end_col = sum((ord(c) - ord('A') + 1) * (26 ** i) for i, c in enumerate(reversed(end_col_str))) - 1
+                    location['row'] = int(start_row) - 1
+                    location['col'] = start_col
+                    location['end_row'] = int(end_row) - 1
+                    location['end_col'] = end_col
+            
+            # For metadata tools, indicate general sheet access
+            if tool_name in {'analyze_excel_data', 'get_workbook_metadata'}:
+                location['type'] = 'scan'
+        
+        # Only return if we have meaningful location data
+        if location and (location.get('row') is not None or location.get('type') or location.get('sheet_name')):
+            return location
+        
+        return None
 
     def _summarize_tool_result(self, tool_name: str, result: Any) -> str:
         """
